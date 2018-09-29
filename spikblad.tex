@@ -1,0 +1,148 @@
+\documentclass[11pt]{book}
+\usepackage[paper=a4paper]{geometry}
+
+\usepackage{ae}
+\renewcommand{\ttdefault}{aett}
+\usepackage[english]{babel}
+\usepackage[latin1]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{epsfig}
+\usepackage[Lenny]{fncychap}
+\usepackage{setspace}
+\usepackage{multicol}
+\usepackage{rotating} % Rotating tables sideways
+\usepackage{paralist} % For nice Paper I, II etc.
+\usepackage{bibentry, natbib}
+\usepackage{pseudocode} % Used in LOPI (so far)
+\usepackage{supertabular} % Used in the survey
+\usepackage{placeins} % \FloatBarrier
+\usepackage{url}
+\usepackage{ethiop}
+
+\makeatletter
+\renewcommand\maketitle{%
+  \thispagestyle{empty}%
+  \newlength\tmpoddsidemargin
+  \newlength\tmpevensidemargin
+  \setlength\tmpoddsidemargin{\oddsidemargin}
+  \setlength\tmpevensidemargin{\evensidemargin}
+  \setlength\oddsidemargin{0in}
+  \setlength\evensidemargin{0in}
+  \thispagestyle{empty}%
+  \begin{center}\leavevmode
+    Blekinge Institute of Technology \\
+    Doctoral Dissertation Series No. {\@series} \\
+    ISSN {\@issn} \\
+    ISBN {\@isbn} \\
+
+    \vspace*{\stretch{1}} % 1/3 down
+    \vspace*{0.25cm}
+    \normalfont
+    {\LARGE \textbf{\@title}\par}%
+
+    \vspace*{0.20cm}
+    {\Large \@author\par}%
+
+    \vspace*{0.25cm}
+    {\Large Akademisk avhandling\\}
+    {\large Som för avläggande av teknologie doktorsexamen vid Blekinge Tekniska
+      Högskola kommer att offentligt försvaras I Tellus, Etapp VIII, Soft
+      Center, Ronneby, fredagen den 9 maj 2008, kl. 13.15}
+
+    \vspace*{\stretch{2}} % 2/3 down
+    \includegraphics[width=3cm]{/home/ska/figures/BTH_logo_bw}
+
+    \@institution \\
+    Blekinge Institute of Technology \\
+    Sweden
+
+    \vspace*{0.45cm}
+  \begin{tabular}{p{6.5cm}p{0.5cm}p{7.8cm}}
+    \textbf{Handledare}:                          & &  \textbf{Fakultetsopponent}: \\
+    Professor Lars Lundberg, sektionen för teknik, BTH, Sverige  & & Professor Jakob
+    Engblom, Virtutech\\
+    Professor Håkan Grahn, sektionen för teknik, BTH, Sverige  & &
+    \textbf{Betygsnämnd}: \\
+    && Professor Magnus Jonsson, Högskolan i Halmstad \\
+    && Professor Welf Löwe, Växjö Universitet \\
+    && Professor Lars Asplund, Mälardalens Högskola \\
+    && Professor Hans-Jürgen Zepernick, Blekinge Tekniska Högskola (suppleant)
+  \end{tabular}
+  \end{center}
+  \null
+\pagestyle{empty} % No page numbers on the first pages
+
+  \begin{center}
+    \LARGE
+    Abstract
+  \end{center}
+\input{abstract.tex}
+
+}
+\def\series#1{\def\@series{#1}}
+\def\isbn#1{\def\@isbn{#1}}
+\def\issn#1{\def\@issn{#1}}
+\def\institution#1{\def\@institution{#1}}
+\def\location#1{\def\@location{#1}}
+\def\email#1{\def\@email{#1}}
+\def\illustration#1{\def\@illustration{#1}}
+\makeatother
+
+
+\newcommand{\papertitle}[3]{%
+  \begin{hyphenrules}{nohyphenation}
+    \begin{spacing}{1.0}
+      \begin{Large}
+        #1
+      \end{Large}
+      \begin{flushleft}
+        \textbf{#2}
+
+        #3
+      \end{flushleft}
+    \end{spacing}
+  \end{hyphenrules}
+}
+
+\widowpenalty=50000
+\clubpenalty=50000
+\parskip 2ex
+\bibliographystyle{abbrv}
+
+\begin{document}
+\selectlanguage{english}
+\nobibliography*
+\hyphenation{}
+
+\title{Tools, techniques, and trade-offs when porting large software systems
+  to new environments}
+
+\author{Simon Kågström}
+\series{2008:07}
+\issn{1653-2090}
+\isbn{78-91-7295-137-2}
+\institution{
+  Department of Systems and Software Engineering \\
+  School of Engineering}
+\location{
+  Blekinge Institute of Technology \\
+  P.O. Box 520 \\
+  372 25 Ronneby \\
+  Sweden
+}
+\email{simon.kagstrom@bth.se}
+\illustration{\copyright~2008 XXX}
+\date{2008}
+
+\pagestyle{empty} % No page numbers on the first pages
+\maketitle
+
+\pagestyle{empty} % No page numbers on the first pages
+\frontmatter
+
+\end{document}
+
+%%% Local Variables: 
+%%% mode: latex
+%%% TeX-master: t
+%%% End: 

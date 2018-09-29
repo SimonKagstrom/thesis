@@ -1,0 +1,769 @@
+% Lägg till: An Effective Design of Master-Slave Operating System Architecture for Multiprocessor Embedded Systems
+\section{Introduction}
+
+With the advent of multicore and simultaneous multithreaded processors, shared
+memory multiprocessors are becoming very common. This makes operating system
+support for multiprocessors increasingly important. Some operating systems
+already include support for multiprocessors, but many special-purpose
+operating systems still need to be ported to benefit from multiprocessor
+computers. To get good multiprocessor support, a number of challenges
+involving concurrency issues, have to be solved, and how these are handled
+affect the engineering time needed for the multiprocessor implementation.
+
+There are a number of possible technical approaches when porting an operating
+system to a multiprocessor, e.g., introducing coarse or fine grained locking
+of shared resources in the kernel, introducing a virtualization layer between
+the operating system and the hardware, or using the master-slave and other
+asymmetric approaches.
+
+The development effort and lead time for porting an operating system to a
+multiprocessor vary depending on the technical approach used. The technical
+approach also affects multiprocessor performance.  The choice of technical
+approach depends on a number of factors; two important factors are the
+available resources for doing the port and the performance requirements on the
+multiprocessor operating system. Consequently, understanding the performance
+and development cost implications of different technical solutions is crucial
+when selecting a suitable approach.
+
+In this paper we identify seven technical approaches for doing a
+multiprocessor port. We also provide an overview of the development time and
+multiprocessor performance implications of each of these approaches.  We base
+our results on a substantial literature survey, and also provide a case study
+concerning the development effort and multiprocessor performance (in terms of
+scalability) of different versions of Linux. We have limited the study to
+operating systems for shared memory multiprocessors.
+
+The rest of the paper is structured as follows.
+Section~\ref{sec:survey:challenges} describes the challenges faced in a
+multiprocessor port. In Section~\ref{sec:survey:categorization} we present a
+categorization of porting methods, and
+Section~\ref{sec:survey:implementations} then categorizes a number of existing
+multiprocessor systems. In Section~\ref{sec:survey:linux}, we describe our
+Linux case study, and finally discuss our findings and conclude in
+Section~\ref{sec:survey:discussion}.
+
+\section{Multiprocessor Port Challenges}
+\label{sec:survey:challenges}
+A uniprocessor operating system needs to be changed in a number of ways to
+support multiprocessor hardware. Some data structures must be made CPU-local,
+like for example the currently executing process. The way CPU-local data
+structures are implemented varies. One approach is to replace the affected
+variables with vectors that are indexed with the CPU number. Another is to
+cluster the CPU-local data structures in a virtual memory region and map this
+region to different physical memory pages for each CPU.
+
+In a uniprocessor kernel where processes cannot be preempted in-kernel, the
+only source of concurrency issues is interrupts, and disabling interrupts is
+then enough for protection against concurrent access. On multiprocessors,
+disabling interrupts is not enough as it only affects the local processor.
+Also, multiple processors accessing shared memory at the same time can cause
+conflicts even outside interrupt context. A locking scheme is therefore
+needed. Locking can be implemented in different ways, e.g., through spinlocks
+or semaphores. Spinlocks are implemented by letting the processor do a busy
+wait for a held lock. Acquiring a semaphore usually involves a context switch
+to let other processes execute, and is therefore better suited if the lock is
+held for a long time. Kernels which support in-kernel process preemption
+(i.e., involuntarily suspending threads within the kernel) need protection of
+shared data structures even on uniprocessors.
+
+Locking affect both performance and development time of multiprocessor
+operating systems. A held spinlock means that another processor cannot enter a
+section of code or access a region of data, which locks the processor out from
+useful work. At the same time, race conditions can occur if data is not
+properly protected by locks, and careful examination of dependencies between
+locks etc. adds to the development time.
+
+Many modern processors employ memory access reordering to improve performance.
+Therefore, memory barriers are sometimes needed to prevent inconsistencies.
+For example, a structure needs to be written into memory before the structure
+is inserted into a list for all processors to see the updated data
+structure. Further, debugging, which is hard even in uniprocessor operating
+systems, become more difficult when several processors execute in the kernel
+at the same time.
+
+
+\begin{figure*}[t!]
+  \begin{tabular}{ccc}
+    \epsfig{width=0.30\linewidth, file=figures/smp-survey/giant_lock}\hspace{0.22cm} & \epsfig{width=0.30\linewidth, file=figures/smp-survey/coarse_grained}\hspace{0.22cm} & \epsfig{width=0.30\linewidth, file=figures/smp-survey/fine_grained} \\
+    (a) Giant lock & (b) Coarse-grained & (c) Fine-grained \\
+    \\
+    \epsfig{width=0.30\linewidth, file=figures/smp-survey/master_slave}\hspace{0.22cm} & \epsfig{width=0.30\linewidth, file=figures/smp-survey/appkern}\hspace{0.22cm} & \epsfig{width=0.30\linewidth, file=figures/smp-survey/piglet} \\
+    (d) Master-slave & (e) The Application kernel & (f) Piglet \\
+  \end{tabular}
+  \caption[Multiprocessor operating system oganizations.]{\emph{Continued on
+      next page}}
+  \label{fig:survey:methods}
+\end{figure*}
+
+\begin{figure*}[t]
+  \begin{tabular}{ccc}
+    \epsfig{width=0.30\linewidth, file=figures/smp-survey/cache_kernel}\hspace{0.22cm} & \epsfig{width=0.30\linewidth, file=figures/smp-survey/virtualization}\hspace{0.22cm} & \epsfig{width=0.30\linewidth, file=figures/smp-survey/k42} \\
+    (g) Cache-kernel & (h) Virtualization & (i) K42 \\
+  \end{tabular}
+
+  \begin{flushleft}
+  Figure~\ref{fig:survey:methods}: Multiprocessor operating system
+  organizations. Thick lines show locks and the flash symbol denote system
+  calls or device interrupts. The figure shows both categories and examples of
+  systems.
+  \end{flushleft}
+\end{figure*}
+
+\section{Categorization}
+\label{sec:survey:categorization}
+We have categorized the porting approaches into the following implementation
+approaches: \emph{giant locking}, \emph{coarse-grained locking},
+\emph{fine-grained locking}, \emph{lock-free}, \emph{asymmetric},
+\emph{virtualization}, and \emph{reimplementation}. Other surveys and
+books~\cite{mukherjee93survey, schimmel94unix} use other categorizations,
+e.g., depending on the structuring approach (microkernels and monolithic
+kernels). In this section we describe the properties of each of these
+implementation methods.
+
+
+\subsection{Locking-based schemes}
+
+\subsubsection{Giant Locking}
+With giant locking (Figure~\ref{fig:survey:methods}a), a single spin lock
+protects the entire kernel from concurrent access. The giant lock serializes
+all kernel accesses, so most of the uniprocessor semantics can be kept. Giant
+locking requires small changes to the kernel apart from acquiring and
+releasing the lock, e.g., processor-local pointers to the currently executing
+process.  Performance-wise, scalability is limited by having only one
+processor executing in the kernel at a time.
+
+Giant locking presents only a minor risk for deadlocks and race conditions
+since the kernel access is serialized. The number of places the giant lock
+needs to be taken corresponds to the number of entry points into the kernel,
+which greatly simplifies the implementation. In terms of porting, the giant
+locking approach provides a straightforward way of adding multiprocessor
+support since most of the uniprocessor semantics of the kernel can be kept.
+However, the kernel also becomes a serialization point, which makes scaling
+very difficult for kernel-bound benchmarks. As a foundation for further
+improvements, giant locking still provides a viable first step because of its
+relative simplicity.
+
+\subsubsection{Coarse-grained Locking}
+Coarse-grained locks protect larger collections of data or code, such as
+entire kernel subsystems as shown in Figure~\ref{fig:survey:methods}b.
+Compared to giant-locking, coarse-grained locks open up for some parallel work
+in the kernel.  For example, a coarse-grained kernel can have separate locks
+for the filesystem and network subsystems, allowing two processors to
+concurrently execute in different subsystems. However, inter-dependencies
+between the subsystems can force an effective serialization similar to giant
+locking. If subsystems are reasonably self-contained, coarse-grained locking
+is fairly straightforward, otherwise complex dependencies might cause data
+races or deadlocks.
+
+\subsubsection{Fine-grained Locking}
+Fine-grained locking (Figure~\ref{fig:survey:methods}c), restricts the locking
+to individual data structures or even parts of data structures.  Fine-grained
+locking allows for increased parallelism at the cost of more lock invocations
+and more complex engineering. Even fine-grained implementations will sometimes
+use coarse-grained locks, which are more beneficial for uncontended data.
+
+Finer granularity of the locks at makes the implementation more prone to
+errors such as race conditions and deadlocks, especially compared to the giant
+locking approach.
+
+\subsection{Lock-free Approaches}
+Using hardware support, it is possible to construct lock-free operating
+systems. Lock-free algorithms rely on instructions for atomically checking and
+updating a word in memory (compare-and-swap, CAS), found on many CPU
+architectures. However, for efficient implementation of lock-free algorithms,
+a CAS instruction capable of updating multiple locations is needed, e.g.,
+double CAS (DCAS). Simple structures such as stacks and lists can be
+implemented directly with CAS and DCAS, while more complex structures use
+versioning and retries to detect and handle concurrent
+access.~\cite{massalin92lockfree}
+
+A completely lock-free operating system relies on these specialized data
+structures. Lock-free data structures are sometimes hard to get correct and
+can be inefficient without proper hardware support~\cite{doherty04dcas}, which
+limits the scalability of completely lock-free approaches. Also, transforming
+an existing kernel to lock-free operation requires a major refactoring of the
+kernel internals, so the development costs of a lock-free kernel is likely to
+be high.
+
+\subsection{Asymmetric Approaches}
+It is also possible to divide the work asymmetrically among the processors.
+Asymmetric operating systems assign processors to special uses, e.g., compute
+processors or I/O handling processors. Such a system might be beneficial for
+cases where there is a high I/O load, or to simplify operating system ports
+(as discussed in Section~\ref{sec:survey:asymmetric}).
+
+Since asymmetric systems can be very diverse, both the implementation cost and
+scalability of these systems will vary.
+
+\subsection{Virtualization}
+A completely different method is to partition the multiprocessor machine into
+a virtual cluster, running many OS instances on shared hardware
+(Figure~\ref{fig:survey:methods}h). This category can be further
+subdivided into fully virtualized and paravirtualized systems, where the
+latter employs operating system modifications and virtual extensions to the
+architecture to lower virtualization overhead or handle hardware limitations
+which makes full virtualization hard to achieve~\cite{robin00intel}.
+
+The virtualizing layer, called a Hypervisor, runs at a higher privilege level
+than the operating system kernel. The Hypervisor performs handling and
+multiplexing of virtualized resources, which makes the Hypervisor less
+demanding to implement than a full operating system kernel. As virtualization
+also allows existing uniprocessor operating systems to run with small or no
+modifications, the development costs of a port is limited.
+
+As discussed above, not all processor architectures are well suited for full
+virtualization. Recent processors therefore have hardware support for
+virtualization~\cite{uhlig05virtualization, amd05pacifica}, e.g., through
+providing an extra set of privilege levels and trapping on access to
+privileged instructions. With this hardware extensions, unmodified operating
+systems can run on top of a Hypervisor, although the performance will be
+limited by emulation of hardware devices.
+
+
+\subsection{Reimplementation}
+A final approach is to reimplement the core of the kernel for multiprocessor
+support and provide API/ABI compatibility with the original kernel.  While
+drastic, this can be an alternative for moving to large-scale multiprocessors,
+when legacy code might otherwise limit the scalability.
+
+\section{Operating System Implementations}
+\label{sec:survey:implementations}
+In this section, we discuss different implementations of multiprocessor ports
+representing the different porting approaches presented.
+Table~\ref{tab:survey:categorization} provides a summary of the discussed
+systems.
+
+
+\subsection{Giant-locking Implementations}
+
+Many multiprocessor ports of uniprocessor operating systems are first
+implemented with a giant locking approach, e.g., Linux 2.0~\cite{beck98linux},
+FreeBSD~\cite{lehey03freebsd}, and other kernels~\cite{kagstrom05experiences}.
+Later releases relaxes the locking scheme with a more fine-grained approach. We discuss
+the Linux giant locking more in detail in Section~\ref{sec:survey:linux}.  The
+industrial kernel described in~\cite{kagstrom05experiences} uses a giant
+locking approach for the first version of the port. The performance of the
+port was found to be limited due to a large proportion of in-kernel time. This
+port was shown to be difficult due to a large code size and a single-person
+development team.
+
+The QNX Neutrino microkernel~\cite{qnx} also protects the kernel with a giant
+lock. Latency for QNX is limited by the small amount of code actually executed
+within the kernel. However, as most operating system functionality are handled
+by server processes, the parallelization of these are more important than the
+actual kernel.
+
+
+\subsection{Coarse-grained locking implementations}
+
+A special case of coarse-grained locking is \emph{funnels} used in DEC
+OSF/1~\cite{denham94osf1}, and Mac~OS~X~\cite{gerbag02advanced}. In OSF/1,
+code running inside a funnel always executes serialized on a ``master''
+processor, similar to master-slave systems.
+
+Mac~OS~X started out with what was effectively a giant lock (a funnel for the
+entire BSD portion of the kernel), but thereafter evolved into a more
+coarse-grained implementation with separate funnels for the filesystem and
+network subsystems. Mac~OS~X does not restrict the funnel to a single
+processor. Instead the funnel acts as a subsystem lock, which is released on
+thread rescheduling. Currently, Mac~OS~X is reworked to support locking at a
+finer granularity.
+
+\begin{table*}[t!]
+  \begin{center}
+    \caption[Categorized multiprocessor operating systems.]{\emph{Continued on
+      next page.}}
+    \label{tab:survey:categorization}
+    \vspace{0.4in}
+    \scriptsize
+    \begin{tabular}{l|ll|}
+      \cline{2-3}
+      System & Method & Focus \\
+      \hline
+      \hline
+      Linux 2.0~\cite{beck98linux}          & Giant            & General purpose      \\
+      FreeBSD 4.9~\cite{lehey03freebsd}     & Giant            & General purpose      \\
+      QNX~\cite{qnx}                        & Giant            & Real-time            \\
+      \hline
+      Linux 2.2                             & Coarse           & General purpose      \\
+      Mac~OS~X~\cite{gerbag02advanced}      & Coarse           & General purpose      \\
+      \hline
+      OSF/1~\cite{denham94osf1}             & Fine             & General purpose      \\
+      Linux 2.4                             & Fine             & General purpose      \\
+      Linux 2.6~\cite{love2003linux}        & Fine             & General purpose      \\
+      AIX~\cite{clark95symmetric, talbot95aix} & Fine          & General purpose      \\
+      Solaris~\cite{kleinman92solaris}      & Fine             & General purpose      \\
+      FreeBSD 5.4                           & Fine             & General purpose      \\
+      \hline
+      Synthesis~\cite{massalin92lockfree}   & Lock-free        & General purpose      \\
+      Cache kernel~\cite{cheriton94caching} & Lock-free        & Application specific \\
+      \hline
+      Dual VAX 11/780~\cite{goble82dualvax} & Asymmetric       & General purpose      \\
+      Application kernel~\cite{ska2004}     & Asymmetric       & Low effort           \\
+      Piglet~\cite{muir01piglet}            & Asymmetric       & I/O intensive        \\
+      \hline
+      Cellular Disco~\cite{govil99cellular} & Virtualized      & Hardware sharing, fault tolerance\\
+      VMWare ESX~\cite{rosenblum05virtual}  & Virtualized      & Hardware sharing  \\
+      L4Linux~\cite{uhlig04scalablevms}     & Virtualized      & Hardware sharing  \\
+      Adeos~\cite{yaghmour2002}             & Virtualized      & Hardware sharing  \\
+      Xen~\cite{barham03xen}                & Virtualized      & Hardware sharing  \\
+      \hline
+      K42~\cite{appavoo03enabling}          & Reimpl.          & Scalability \\
+      \hline
+      \hline
+    \end{tabular}
+  \end{center}
+\end{table*}
+
+\begin{table*}[t!]
+  \begin{center}
+    \begin{flushleft}
+      Table~\ref{tab:survey:categorization}: Summary of the categorized
+      multiprocessor operating systems. The code lines refer to the latest
+      version available and the development time is the time between the two
+      last major releases.
+    \end{flushleft}
+    \vspace{0.2in}
+    \scriptsize
+    \begin{tabular}{l|rr|rl|}
+      \cline{2-5}
+      & \multicolumn{2}{c}{Performance}\vline & \multicolumn{2}{c}{Effort}\vline \\
+      \cline{2-5}
+      System & Latency & Scalability & Code lines & Devel. time \\
+      \hline
+      \hline
+      Linux 2.0~\cite{beck98linux}          & High & Low & 955K & 12 months\\
+      FreeBSD 4.9~\cite{lehey03freebsd}     & High & Low & 1.9M & ?\\
+      QNX~\cite{qnx}                        & Low & ? & ? & ? \\
+      \hline
+      Linux 2.2                             & Medium & Low & 2.5M & 18 months \\
+      Mac~OS~X~\cite{gerbag02advanced}      & High & Low & ? & ? \\
+      \hline
+      OSF/1~\cite{denham94osf1}             & Low & High & ? & ?\\
+      Linux 2.4                             & Medium & Medium & 5.2M & 11 months \\
+      Linux 2.6~\cite{love2003linux}        & Low & High & 6.1M & 11 months \\
+      AIX~\cite{clark95symmetric, talbot95aix}& Low & High & ? & 18 months \\
+      Solaris~\cite{kleinman92solaris}      & Low & High & ? & ? \\
+      FreeBSD 5.4                           & Low & High & 2.4M & ? \\
+      \hline
+      Synthesis~\cite{massalin92lockfree}   & Low & ? & ? & ? \\
+      Cache kernel~\cite{cheriton94caching} & Low & ? & 15k & ? \\
+      \hline
+      Dual VAX 11/780~\cite{goble82dualvax} & High & Low & ? & ? \\
+      Application kernel~\cite{ska2004}     & High & Low & 3,600 & 5 weeks \\
+      Piglet~\cite{muir01piglet}            & As UP & Dep. on UP & ? & ? \\
+      \hline
+      Cellular Disco~\cite{govil99cellular} & As Guest & As Guest & 50k & ?\\
+      VMWare ESX~\cite{rosenblum05virtual}  & As Guest & As Guest & ? & ? \\
+      L4Linux~\cite{uhlig04scalablevms}     & As Guest & As Guest & ? & ? \\
+      Adeos~\cite{yaghmour2002}             & As Guest & As Guest & ? & ?\\
+      Xen~\cite{barham03xen}                & As Guest & As Guest & 75k+38k & ?\\
+      \hline
+      K42~\cite{appavoo03enabling}          & Low & High & 50k & ? \\
+      \hline
+      \hline
+    \end{tabular}
+  \end{center}
+\end{table*}
+
+\subsection{Fine-grained locking implementations}
+% FIX: (?) add info about local run queue, work stealing scheduler?
+AIX~\cite{clark95symmetric} and DEC OSF/1 3.0~\cite{denham94osf1} were
+released with fine-grained locking from the start. In both cases, the SMP port
+was based on a preemptible uniprocessor kernel, which simplified porting since
+disabling of preemption correspond to places where a lock is needed in the
+multiprocessor version.
+
+During the development of OSF/1, funneling was used to protect the different
+subsystems while core parts like the scheduler and virtual memory management
+were parallelized.  Solaris~\cite{kleinman92solaris} and current versions of
+Linux~\cite{love2003linux} and FreeBSD also implement fine-grained locking.
+
+
+\subsection{Lock-free Implementations}
+To our knowledge, there exists only two operating system kernels which rely
+solely on lock-free algorithms; Synthesis~\cite{massalin92lockfree} and the
+Cache Kernel~\cite{cheriton94caching}. Synthesis uses a traditional monolithic
+structure but restricts kernel data structures to a few simple lock-free
+implementations of e.g., queues and lists.
+
+The Cache Kernel~\cite{cheriton94caching}
+(Figure~\ref{fig:survey:methods}g) provides basic kernel support for
+address spaces, threads, and application kernels. Instead of providing full
+implementations of these concepts, the Cache Kernel caches a set of active
+objects which is installed by the application kernels. For example, the
+currently running threads are present as thread objects holding the basic
+register state, while an application kernel holds the complete state.  The
+Cache Kernel design caters for a very small kernel which can be easily
+verified and implemented in a lock-free manner. Note, however, that the
+application kernels still need to be parallelized to fully benefit from
+multiprocessor operation. Both Synthesis and the Cache Kernel were implemented
+for the Motorola 68k CISC architecture, which has architectural support for
+DCAS.  Implementations for other architectures which lack DCAS support might
+be more difficult.
+
+\subsection{Asymmetric Implementations}
+\label{sec:survey:asymmetric}
+The most common asymmetric systems have been master-slave
+systems~\cite{goble82dualvax}, which employ one master processor to run kernel
+code while the other (``slave'') processors only execute user space
+applications. The changes to the original OS in a master-slave port mainly
+consist of the introduction of separate queues for master and slave jobs, as
+shown in Figure~\ref{fig:survey:methods}d. Like giant locks, the performance
+of master-slave systems is limited by allowing only one processor in the
+kernel.
+
+The Application kernel approach~\cite{ska2004}
+(Figure~\ref{fig:survey:methods}e) allows keeping the original
+uniprocessor kernel as-is. The approach runs the original unmodified kernel on
+one processor, while user-level applications run on a small custom kernel on
+the other processors. All processes are divided in two parts, one application
+thread and one bootstrap thread. The application threads run the original
+application. Kernel interaction by the application threads are handled in the
+application kernel, which simply sets a flag for the bootstrap thread. The
+bootstrap thread then forwards system calls, page faults etc., to the
+uniprocessor kernel, which handles them as before.
+
+Since the application kernel approach requires an extra round-trip for kernel
+interaction, the latency of kernel operations increases. The application
+kernel approach can still provide good speedup for compute-bound applications
+at a low implementation cost.
+
+Piglet~\cite{muir01piglet} (Figure~\ref{fig:survey:methods}f) dedicates the
+processors to specific operating system functionality.  Piglet allocates
+processors to run a Lightweight Device Kernel (LDK), which normally handles
+access to hardware devices but can perform other tasks. The LDK is not
+interrupt-driven, but instead polls devices and message buffers for incoming
+work. A prototype of Piglet has been implemented to run beside Linux 2.0.30,
+where the network subsystem (including device handling) has been offloaded to
+the LDK, and the Linux kernel and user-space processes communicate through
+lock-free message buffers with the LDK.
+
+% FIX: Add normal disco
+
+\subsection{Virtualization}
+There are a number of virtualization systems. VMWare ESX
+server~\cite{rosenblum05virtual} is a fully virtualized system which uses
+execution-time dynamic binary translation to handle virtualization problems of the
+IA-32 platform. Cellular disco~\cite{govil99cellular} is a paravirtualized
+system created to use large NUMA machines efficiently. The underlying
+Hypervisor is divided into isolated cells, each handling a subset of the
+hardware resources to provide fault containment.
+
+Xen~\cite{barham03xen} uses a paravirtualized approach for the Intel IA-32
+architecture currently capable of running uniprocessor Linux and NetBSD as
+guest operating systems. The paravirtualized approach allows higher
+performance than a fully virtualized approach on IA-32.  For example, the real
+hardware MMU can be used instead of software lookup in a virtual MMU. The Xen
+hypervisor implementation consists of around 75,000 lines of code while the
+modifications to Linux 2.6.10, mostly being the addition of a virtual
+architecture for Xen, is around 38,000 lines of code. A larger portion of this
+is drivers for virtual devices. The Adeos Nanokernel~\cite{yaghmour2002} also
+works similar to Xen, requiring modifications to the guest kernel's (Linux)
+source code.
+
+As an example of a reimplementation, K42~\cite{appavoo03enabling}
+(Figure~\ref{fig:survey:methods}i) is ABI-compatible with Linux but
+implemented from scratch.  K42 is a microkernel-based operating system with
+most of the operating system functionality executing in user-mode servers or
+replaceable libraries. K42 avoids global objects and instead distributes
+objects among processors and directs access to the processor-local objects.
+Also, K42 supports runtime replacement of object implementations to improve
+performance for various workloads.
+
+\section{Linux Case Study}
+\label{sec:survey:linux}
+% 1.3.28: 17/9 1995 (development)
+% 2.0:     2/6 1996   0
+% 2.2:    25/1 1999   2.5 years
+% 2.4:     4/1 2001   2   years
+% 2.6:   17/12 2003   2   years
+
+In order to provide more insight into the trade-offs between performance and
+development effort, we have conducted a case study of the evaluation of
+multiprocessor support and locking in the Linux kernel.  Linux evolved from
+using a giant locking approach in the 2.0 version, through a coarse-grained
+approach in 2.2 to using a more fine-grained approach in 2.4 and 2.6.
+Multiprocessor support in Linux was introduced in the stable 2.0.1 kernel,
+released in June 1996. 18 months later, in late January 1999, 2.2.0 was
+released. The 2.4.0 kernel came 11 months later, in early January 2001, while
+2.6.0 was released in late December 2003, almost 12 months after the previous
+release.
+
+We have studied how three parameters have evolved from kernel versions 2.0 to
+2.6. First, we examined the locking characteristics.  Second, we examined the
+source code changes for multiprocessor support, and third, we measured
+performance for both a kernel-bound benchmark and a compute-bound benchmark.
+
+% Methodology
+We chose to compare the latest versions at the time of writing of each of the
+stable kernel series, 2.0.40, 2.2.26, 2.4.30, and 2.6.11.7.  We examined files
+in \texttt{kernel/}, \texttt{mm/}, \texttt{arch/i386/},
+\texttt{include/asm-i386/}, i.e., the kernel core and the IA-32-specific
+parts. We also include \texttt{fs/} and \texttt{fs/ext2}. The ext2 filesystem
+was chosen since it is available in all compared kernel versions. We exclude
+files implementing locks, e.g, \texttt{spinlocks.c}, and generated files.
+
+To see how SMP support changes the source code, we ran the C preprocessor on
+the kernel source, with and without \texttt{\_\_SMP\_\_} and
+\texttt{CONFIG\_SMP} defined. The preprocessor ran on the file only (without
+include-files).  We also removed empty lines and indented the files with the
+\textbf{indent} tool to avoid changes in style affecting the results.
+
+\subsection{Evolution of Locking in Linux}
+In the 2.0 versions, Linux uses a giant lock, the ``Big Kernel Lock'' (BKL).
+Interrupts are also routed to a single CPU, which limits the scalability. On
+the other hand, multiprocessor support in Linux 2.0 was possible to implement
+without major restructuring of the uniprocessor kernel.
+
+\begin{table}[t]
+  \begin{center}
+    \caption{Number of locks in the Linux kernel.}
+    \label{tab:survey:linux_locks}
+    \begin{tabular}{l|rrrrr|r}
+      & \multicolumn{5}{c}{Number of locks} \\
+      Version   & BKL & spinlock & rwlock & seqlock & rcu & sema\\
+      \hline
+      2.0.40    &  17 &     0 &   0 &  0 &  0 &  49 \\
+      2.2.26    & 226 &   329 & 121 &  0 &  0 & 121 \\
+      2.4.30    & 193 &   989 & 300 &  0 &  0 & 332 \\
+      2.6.11.7  & 101 & 1,717 & 349 & 56 & 14 & 650 \\
+    \end{tabular}
+  \end{center}
+\end{table}
+
+Linux 2.2 relaxed the giant locking scheme to adopt a coarse-grained scheme.
+2.2 also added general-purpose basic spinlocks and spinlocks for
+multiple\--readers / single\--writer (rwlocks). The 2.2 kernels has subsystem
+locks, e.g., for block device I/O requests, while parts of the kernel are
+protected at a finer granularity, e.g., filesystem inode lists and the
+runqueue.  However, the 2.2 kernel still uses the giant lock for many operations,
+e.g., file read and write.
+
+The 2.4 version of the kernel further relaxes the locking scheme. For example,
+the giant lock is no longer held for virtual file system reads and writes.  Like
+earlier versions, 2.4 employs a single shared runqueue from which all
+processors take jobs.
+
+Many improvements of the multiprocessor support were added in the 2.6 release.
+2.6 introduced seqlocks, read-copy update mutual
+exclusion~\cite{mckenney02rcu}, processor-local runqueues, and kernel
+preemption. Kernel preemption allows processes to be preempted within the
+kernel, which reduces latency. A seqlock is a variant of rwlocks that
+prioritizes writers over readers. Read-copy update (rcu), finally, is used to
+defer updates to a structure until a safe state when all active references to
+that structure are removed, which allows for lock-free access. The safe state
+is when the process does a voluntary context switch or when the idle loop is
+run, after which the updates can proceed.
+
+\subsection{Locking and Source Code Changes}
+Table~\ref{tab:survey:linux_locks} shows the how the lock usage has evolved
+throughout the Linux development. The table shows the number of places in the
+kernel where locks are acquired and released. Semaphores (sema in the table)
+are often used to synchronize with user-space, e.g., in the system call
+handling, and thus have the same use on uniprocessors.
+
+As the giant lock in 2.0 protects the entire kernel, there are only 17 places
+with BKL operations (on system calls, interrupts, and in kernel daemons). The
+coarse-grained approach in 2.2 is significantly more complex.  Although 2.2
+introduced a number of separate spinlocks, around 30\% (over 250 places) of
+the lock operations still handle the giant lock. The use of the giant lock has
+been significantly reduced in 2.4, with around 13\% of the lock operations
+handle the giant lock. This trend continues into 2.6, where less than 5\% of
+the lock operations handled the giant lock. The 2.6 seqlocks and read-copy
+update mutual exclusion are still only used in a few places in the kernel.
+
+\begin{table}[t]
+  \begin{center}
+    \caption{Lines of code with and without SMP support in Linux.}
+    \label{tab:survey:linux_smp_changes}
+    \begin{tabular}{l|rr|rrr}
+      & & & \multicolumn{3}{c}{Lines} \\
+      Version & Files & Changed  & No SMP & SMP & Modified/ \\
+      & & Files & & & new/ \\
+      & & & & & removed \\
+      \hline
+      2.0.40   &  173 & 22 &  45,392 &  45,770 &   541 \\
+      2.2.26   &  226 & 36 &  52,294 &  53,281 & 1,156 \\
+      2.4.30   &  280 & 38 &  64,293 &  65,552 & 1,374 \\ %319 & 40 &  82,857 &  84,154 & 1,412
+      2.6.11.7 &  548 & 49 & 104,147 & 105,846 & 1,812 \\ %601 & 51 & 132,960 & 134,662 & 1,819 \\
+    \end{tabular}
+  \end{center}
+\end{table}
+
+Table~\ref{tab:survey:linux_smp_changes} shows the results from the C
+preprocessor study. From the table, we can see that most files have no
+explicit changes for the multiprocessor support. In terms of modified, added,
+or removed lines, multiprocessor support for the 2.0 kernel is significantly
+less intrusive than the newer kernels, with only 541 source lines (1.19\% of
+the uniprocessor source code) modified. In 2.2 and 2.4, around 2.2\% of the
+lines differ between the uniprocessor and multiprocessor kernels, while the
+implementation is closer again in 2.6 with 1.7\% of the lines changed.
+
+
+\subsection{Performance Evaluation}
+We also did a performance evaluation to compare the different Linux kernel
+versions in the Postmark benchmark~\cite{katcherpostmark} and the SPLASH-2 FFT
+benchmark\cite{cameron95splash}. The purpose of the performance evaluation is
+to show the scalability differences between the versions with two benchmarks
+with different characteristics. We use a simulated environment in order to get
+access to larger configurations than the hardware we have at hand. The results
+from the simulated environment shouldn't be directly compared to actual
+hardware, but it should make the scalability properties of the different
+kernels clear.
+
+We compiled the 2.0 and 2.2 kernels with GCC 2.7.2 whereas 2.4 and 2.6 were
+compiled with GCC 3.3.5. All kernels were compiled with SMP-support enabled,
+which is a slight disadvantage on uniprocessors. The system is a minimal
+Debian GNU/Linux system which uses the ext2 filesystem which is available in
+all kernel versions. We ran 8 Postmark processes in parallel and measured the
+time used for all of them to complete.  The benchmark was executed in the
+Simics full-system simulator~\cite{simics}, which was configured to simulate
+between 1 and 8 processors. Simics simulates a complete computer system
+including disks, network, and CPUs including the memory hierarchy modeled
+after the Pentium~4.
+
+The Postmark
+benchmark models the file system behavior of Internet servers for electronic
+mail and web-based commerce, focusing on small-file performance. This
+kernel-bound benchmark requires a highly parallelized kernel to exhibit
+performance improvements (especially for the file and block I/O subsystems).
+We ran Postmark with 10,000 transactions, 1,000 simultaneous files and a file
+size of 100 bytes.
+
+The FFT benchmark is a computationally intensive benchmark that performs
+Fourier transformations. The benchmark ran with 8 parallel threads (created
+with \texttt{pthreads}) for all configurations. We compare the time needed to
+complete the entire benchmark.
+
+\begin{figure}[t]
+  \begin{center}
+    \includegraphics[width=0.70\linewidth]{data/smp-survey/postmark}
+  \end{center}
+  \caption{Postmark benchmark running on different versions of Linux.}
+  \label{fig:survey:postmark}
+\end{figure}
+
+\begin{figure}[t]
+  \begin{center}
+    \includegraphics[width=0.70\linewidth]{data/smp-survey/fft}
+  \end{center}
+  \caption{SPLASH FFT benchmark running on different versions of Linux.}
+  \label{fig:survey:fft}
+\end{figure}
+
+Figure~\ref{fig:survey:postmark} presents the scalability results for the
+Postmark benchmark while Figure~\ref{fig:survey:fft} shows the scalability of
+the SPLASH FFT benchmark. Both results are normalized to uniprocessor
+execution time in Linux 2.0.
+
+In the Postmark benchmark we can see that the absolute uniprocessor
+performance has increased, with 2.4 having the best performance.  Linux 2.0
+and 2.2 do not scale at all with this benchmark, while 2.4 shows some
+improvement over uniprocessor mode.  On the other hand, 2.6 scales well up to
+8 processors. Since the 2.0 kernel uses the giant locking approach, it is not
+surprising that it does not scale in this kernel-bound benchmark.  Since much
+of the file subsystem in 2.2 still uses the giant lock and no scalability
+improvement is shown. The file subsystem revision in 2.4 gives it a slight
+scalability advantage, although it does not scale beyond 3 processors. It is
+not until the 2.6 kernel that Linux manages to scale well for the Postmark
+benchmark. Linux 2.6 has a very good scalability, practically linear up to 7
+processors.
+
+For the compute-bound FFT benchmark, the scalability is similar between all
+versions of Linux. An interesting observation is that while the 2.6 kernel
+offers better performance on the postmark benchmark, it is slightly behind the
+earlier versions for the FFT benchmark. The 2.6 kernel clearly focuses more on
+I/O scalability, which appears to be a slight disadvantage for compute-bound
+tasks.
+
+\section{Discussion}
+\label{sec:survey:discussion}
+Figure~\ref{fig:survey:design_space} shows an approximation of the trade-off
+between scalability and development effort of the different approaches
+presented. It should be noted that when porting a uniprocessor kernel to a
+multiprocessor, it is not always possible to freely select the porting
+approach. For example, employing the Xen hypervisor is only possible if the
+uniprocessor kernel is written for one of the architectures which Xen
+supports.
+
+\begin{figure}[t]
+  \begin{center}
+    \includegraphics[width=0.70\linewidth]{figures/smp-survey/design_space}
+  \end{center}
+  \caption{The available design space.}
+  \label{fig:survey:design_space}
+\end{figure}
+
+% Giant locking
+The giant locking approach provides a straightforward way of adding
+multiprocessor support since most of the uniprocessor semantics of the kernel
+can be kept. However, the kernel also becomes a serialization point, which
+makes scaling very difficult for kernel-bound benchmarks. As a foundation for
+further improvements, giant locking still provides a viable first step because
+of its relative simplicity.
+
+% Coarse grained
+% Fine-grained
+Coarse-grained locking is more complex to introduce than giant locking, as
+seen in the Linux case study. Fine-grained locking further adds to the
+complexity, but also enables better scalability. The AIX and OSF/1 experiences
+indicates that a preemptible uniprocessor kernel simplifies multiprocessor
+porting with finer granularity locks.
+
+% Assymetric
+Since asymmetric systems are very diverse, both scalability and effort will
+vary depending on the approach. In one extreme, the application kernel
+provides a generic porting method with low effort at the cost of limited
+scalability for kernel-bound applications. Master-slave systems require more
+modifications to the original kernel, but have slightly better performance
+than the application kernel because of the extra kernel interaction
+round-trip. More complex asymmetric systems, such as Piglet, can have good
+scalability on I/O-intensive workloads.
+
+% Lock-free
+Because of complex algorithms and limited hardware support, completely
+lock-free operating systems require high effort to provide good scalability
+for ports of existing uniprocessor systems.  Lock-free algorithms are still
+used in many lock-based operating systems, e.g., the read-copy update
+mechanism in Linux.
+
+% Virtualization
+For certain application domains, paravirtualized systems can provide good
+scalability at relatively low engineering costs. Virtualization allows the
+uniprocessor kernel to be kept unchanged for fully virtualized environments or
+with small changes in paravirtualized environments. For example, the Xen
+hypervisor implementation is very small compared to Linux, and the changes
+needed to port an operating system is fairly limited. However, hardware
+support is needed for fault tolerance, and shared-memory applications cannot
+be load-balanced across virtual machines.
+
+% Reimplementation
+Reimplementation enables the highest scalability improvements but at the
+highest effort. Reimplementation should mainly be considered if the original
+operating system would be very hard to port with good results, or if the
+target hardware is very different from the current platform.
+
+
+\section{Conclusions}
+We have presented a categorization of multiprocessor structuring of operating
+systems. We identified seven different approaches, \emph{giant locking},
+\emph{coarse-grained locking}, \emph{fine-grained locking}, \emph{lock-free},
+\emph{asymmetric}, \emph{virtualization}, and \emph{reimplementation}. These
+categories have different performance and implementation complexity
+characteristics, with giant locking and asymmetric systems providing the
+lowest effort and lowest performance, and reimplementation and fine-grained
+locking providing the best performance at a high implementation cost.
+
+The Linux case study illustrates the evolution of multiprocessor support in a
+kernel. The 2.0 giant lock implementation was kept close to the uniprocessor.
+The implementation then adopted a more coarse-grained locking approach, which
+became significantly more complex and also diverged more from the uniprocessor
+kernel. The more fine-grained approaches in 2.4 and 2.6 do not increase the
+complexity as compared to 2.2, which suggests that the implementation
+converges again as it matures.
+
+\section*{Acknowledgments}
+This work was partly funded by The Knowledge Foundation in Sweden under a
+research grant for the project ``Blekinge - Engineering Software Qualities
+(BESQ)'' (\url{http://www.bth.se/~besq}).

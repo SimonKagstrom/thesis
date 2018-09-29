@@ -1,0 +1,39 @@
+# emacs: -*-m4-*-
+#proc page
+#proc getdata
+
+#set BAR_WIDTH = 0.05
+
+file: IN_FILENAME
+
+fieldnames: field value err
+
+#proc areadef
+   rectangle: 1.4 4 6.4 7
+   xrange: 0 5.0
+   yautorange: datafield=value lowfix=0 incmult=2
+   yaxis.stubs: inc
+   yaxis.stubdetails: size=16
+   title: IN_TITLE
+   titledetails: size=18 adjust=TITLE_POS
+
+#saveas AREA_A
+
+
+#proc xaxis
+   stubdetails: size=15
+   stubs: datafields=field
+
+#proc yaxis
+   label: IN_AXIS_NAME
+   labeldetails: size=16 adjust=-0.4,0)
+
+#proc bars
+   lenfield: value
+   color: gray(0.5)
+   showvalues: yes
+   labeldetails: size=16 adjust=0,0.1
+
+#proc bars
+   lenfield: value
+   errbarfields: err

@@ -1,0 +1,306 @@
+\usepackage{ae}
+\renewcommand{\ttdefault}{aett}
+\usepackage[english]{babel}
+\usepackage[latin1]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{epsfig}
+\usepackage[Lenny]{fncychap}
+\usepackage{setspace}
+\usepackage{multicol}
+\usepackage{rotating} % Rotating tables sideways
+\usepackage{paralist} % For nice Paper I, II etc.
+\usepackage{bibentry, natbib}
+\usepackage{pseudocode} % Used in LOPI (so far)
+\usepackage{supertabular} % Used in the survey
+\usepackage{placeins} % \FloatBarrier
+\usepackage{url}
+\usepackage{ethiop}
+
+\makeatletter
+\renewcommand\maketitle{%
+  \null
+  \thispagestyle{empty}%
+  \newlength\tmpoddsidemargin
+  \newlength\tmpevensidemargin
+  \setlength\tmpoddsidemargin{\oddsidemargin}
+  \setlength\tmpevensidemargin{\evensidemargin}
+  \setlength\oddsidemargin{0in}
+  \setlength\evensidemargin{0in}
+  \begin{flushright}
+    {\Large \textbf{\@title}\par}
+
+    {\large \textbf{\@author}\par}
+  \end{flushright}
+  \vspace*{\stretch{1}}
+  \begin{center}
+%    \includegraphics[height=10cm]{figures/cow}
+  \end{center}
+  \newpage
+  \thispagestyle{empty}%
+  \vspace*{\stretch{2}}
+  \begin{flushleft}
+%    Jacket photo: \@illustration
+
+    \copyright~\@date~\@author \\
+    \@institution \\
+    Publisher: Blekinge Institute of Technology \\
+    Printed by Printfabriken, Karlskrona, Sweden \@date \\
+    ISBN \@isbn
+  \end{flushleft}
+  \newpage
+  \thispagestyle{empty}%
+  \begin{center}\leavevmode
+    Blekinge Institute of Technology \\
+    Doctoral Dissertation Series No. {\@series} \\
+    ISSN {\@issn} \\
+    ISBN {\@isbn} \\
+
+    \vspace*{\stretch{1}} % 1/3 down
+    \normalfont
+    {\LARGE \textbf{\@title}\par}%
+
+    \vspace*{0.25cm}
+    {\Large \@author\par}%
+
+    \vspace*{\stretch{2}} % 2/3 down
+    \includegraphics[width=3cm]{/home/ska/figures/BTH_logo_bw}
+
+    \@institution \\
+    Blekinge Institute of Technology \\
+    Sweden
+  \end{center}
+  \newpage
+  \thispagestyle{empty}%
+  \vspace*{\stretch{2}}
+  \begin{flushleft}
+    \textbf{Contact information}:
+
+    \@author \\
+    \@institution \\
+    \@location
+
+    email: \texttt{\@email}
+  \end{flushleft}
+  \null
+  \cleardoublepage
+  \setlength\oddsidemargin{\tmpoddsidemargin}
+  \setlength\evensidemargin{\tmpevensidemargin}
+}
+\def\series#1{\def\@series{#1}}
+\def\isbn#1{\def\@isbn{#1}}
+\def\issn#1{\def\@issn{#1}}
+\def\institution#1{\def\@institution{#1}}
+\def\location#1{\def\@location{#1}}
+\def\email#1{\def\@email{#1}}
+\def\illustration#1{\def\@illustration{#1}}
+\makeatother
+
+
+\newcommand{\papertitle}[3]{%
+  \begin{hyphenrules}{nohyphenation}
+    \begin{spacing}{1.0}
+      \begin{Large}
+        #1
+      \end{Large}
+      \begin{flushleft}
+        \textbf{#2}
+
+        #3
+      \end{flushleft}
+    \end{spacing}
+  \end{hyphenrules}
+}
+
+\widowpenalty=50000
+\clubpenalty=50000
+\parskip 2ex
+\bibliographystyle{abbrv}
+
+\begin{document}
+\selectlanguage{english}
+\nobibliography*
+\hyphenation{}
+
+\title{Tools, techniques, and trade-offs when porting large software systems
+  to new environments}
+
+\author{Simon Kågström}
+\series{2008:07}
+\issn{1653-2090}
+\isbn{78-91-7295-137-2}
+\institution{
+  Department of Systems and Software Engineering \\
+  School of Engineering}
+\location{
+  Blekinge Institute of Technology \\
+  P.O. Box 520 \\
+  372 25 Ronneby \\
+  Sweden
+}
+\email{simon.kagstrom@bth.se}
+\illustration{\copyright~2008 XXX}
+\date{2008}
+
+\pagestyle{empty} % No page numbers on the first pages
+\maketitle
+
+\pagestyle{plain}
+\frontmatter
+\chapter{Abstract}
+\input{abstract.tex}
+
+\chapter{Acknowledgements}
+I would first like to thank my supervisors, \emph{Professor Lars Lundberg} and
+\emph{Professor Håkan Grahn} for their help and guidance in my PhD.  studies.
+Without their help this thesis would never have got this far.
+
+I am also indebted to the people at Ericsson in Älvsjö and Budapest, primarily
+\emph{Hans Nordebäck}, \emph{Lars Hennert}, \emph{Stefan Wikström},
+\emph{Chengwei Ding} and \emph{Baláz Tuska} for giving me the opportunity to
+work in a real-world industrial project and providing help all the times I got
+stuck when working in the project. All my \emph{colleagues}, especially in the
+\emph{PAARTS} group and the \emph{BESQ} project have been very helpful during
+my work, both as friends and discussion partners. I'd like to extend special
+thanks to \emph{Dr. Göran Fries}, from whom I learned most of what I know
+about the MIPS architecture.
+
+Finally, I would like to thank \emph{Linda Ramstedt} for being my loved one
+and supporting me throughout the work on this thesis.
+
+This work has been partially funded by Ericsson in Älvsjö together with The
+Knowledge Foundation in Sweden under a research grant for the project
+``Blekinge -- Engineering Software Qualities
+(BESQ)''~(\url{http://www.ipd.bth.se/besq}).
+
+
+\newcounter{nr:smp-survey}
+\newcounter{nr:tsp-giant-lock}
+\newcounter{nr:tsp-coarse}
+\newcounter{nr:linux-appkern}
+\newcounter{nr:lopi}
+\newcounter{nr:cibyl}
+\newcounter{nr:cibyl-performance}
+\newcounter{nr:ska2004}
+\newcounter{nr:kagstrom05experiences}
+
+% Paper numbers
+\setcounter{nr:smp-survey}{1}
+\setcounter{nr:tsp-giant-lock}{2}
+\setcounter{nr:tsp-coarse}{3}
+\setcounter{nr:linux-appkern}{4}
+\setcounter{nr:lopi}{5}
+\setcounter{nr:cibyl}{6}
+\setcounter{nr:cibyl-performance}{7}
+\setcounter{nr:ska2004}{8}
+\setcounter{nr:kagstrom05experiences}{9}
+
+\chapter{List of Papers}
+\label{sec:intro:publications}
+The following papers are included in the thesis
+
+\begin{compactenum}[{Paper} I:]
+\item \bibentry{kagstrom05survey}
+\item \bibentry{kagstrom05tsp}
+\item \bibentry{kagstrom08dicos}
+\item \bibentry{kagstrom05appkern}
+\item \bibentry{ska05lopi}
+\item \bibentry{kagstrom07cibyl}
+\item \bibentry{kagstrom08performance}
+\end{compactenum}
+
+\begin{flushleft}
+  The following papers are related but not included in the thesis.
+\end{flushleft}
+
+\begin{compactenum}[{Paper} I:]
+\setcounter{enumi}{7}
+\item \bibentry{ska2004}
+\item \bibentry{kagstrom05experiences}
+\end{compactenum}
+
+\begin{flushleft}
+  Paper~\Roman{nr:ska2004} is an earlier version of
+  Paper~\Roman{nr:linux-appkern} and Paper~\Roman{nr:kagstrom05experiences} is
+  an earlier version of Paper~\Roman{nr:tsp-giant-lock}.
+\end{flushleft}
+
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+\mainmatter
+\pagestyle{plain}
+\chapter{Introduction}
+\input{introduction.tex}
+
+
+\chapter{Paper~I}
+\papertitle{Scalability vs. Development Effort for Multiprocessor Operating System Kernels}
+  {Simon Kågström, Håkan Grahn, Lars Lundberg}
+  {Submitted for journal publication, March 2008}
+\label{cha:paper1}
+\label{cha:smp-survey}
+\input{papers/smp-survey/paper.tex}
+
+\chapter{Paper~II}
+\papertitle{The Design and Implementation of Multiprocessor Support for an Industrial Operating System Kernel}
+  {Simon Kågström, Håkan Grahn, Lars Lundberg}
+  {To appear in the International Journal of Computers and Their Application}
+\label{cha:paper2}
+\label{cha:tsp-giant-lock}
+\input{papers/tsp-smp-giant/paper.tex}
+
+\chapter{Paper~III}
+\papertitle{Implementation issues and evolution of a multiprocessor operating system port}
+  {Simon Kågström, Balázs Tuska, Håkan Grahn, Lars Lundberg}
+  {Submitted for publication}
+\label{cha:paper3}
+\label{cha:tsp-coarse}
+\input{papers/tsp-smp-coarse/paper.tex}
+
+\chapter{Paper~IV}
+\papertitle{The Application Kernel Approach - a Novel Approach for Adding SMP Support to Uniprocessor Operating Systems}
+  {Simon Kågström, Håkan Grahn, Lars Lundberg}
+  {Published in the Software: Practice and Experience Journal volume 36(13):1563--1583, November 2006}
+\label{cha:paper4}
+\label{cha:linux-appkern}
+\input{papers/linux-appkern/paper.tex}
+
+\chapter{Paper~V}
+\papertitle{Automatic Low Overhead Program Instrumentation with the LOPI Framework}
+  {Simon Kågström, Håkan Grahn, Lars Lundberg}
+  {Published in the proceedings of the 9th IEEE Workshop on Interaction
+    between Compilers and Computer Architectures, San Francisco, USA, pages
+    82--93, February 2005}
+\label{cha:paper5}
+\label{cha:lopi}
+\input{papers/lopi/paper.tex}
+
+\chapter{Paper~VI}
+\papertitle{Cibyl - an Environment for Language Diversity on Mobile Devices}
+   {Simon Kågström, Håkan Grahn, Lars Lundberg}
+   {Published in the proceedings of the third ACM/Usenix International
+     conference on Virtual Execution Environments (VEE), San Diego, USA, pages
+     13--15, June 2007}
+\label{cha:paper6}
+\label{cha:cibyl}
+\input{papers/cibyl/paper.tex}
+
+\chapter{Paper~VII}
+\papertitle{Optimizations in the Cibyl binary translator for {J2ME} devices}
+   {Simon Kågström, Håkan Grahn, Lars Lundberg}
+   {Published at the 12th Workshop on Interaction between Compilers and
+     Computer Architectures, Salt Lake City, USA, February 2008}
+\label{cha:paper7}
+\label{cha:cibyl-performance}
+\input{papers/cibyl-performance/paper.tex}
+
+\bibliography{bib}
+
+\end{document}
+
+%%% Local Variables: 
+%%% mode: latex
+%%% TeX-master: t
+%%% End: 

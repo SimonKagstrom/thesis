@@ -1,0 +1,26 @@
+Utvecklingen av datorhårdvara och -mjukvara går väldigt snabbt. Under senare
+år har multiprocessorer blivit allt vanligare, och finns nu i de flesta nya
+datorer. På mjukvarusidan har ny hårdvara och krav såsom säkerhet, prestanda
+och underhållbarhet drivit fram utveckligen av nya runtimemiljöer, virtuella
+maskiner och utvecklingsmetodologier. Både hårdvaru- och mjukvaruutveckligen
+orsakar problem när existerande mjukvara skall porteras. Multiprocessorhårdvara
+kräver portering av uniprocessoroperativsystem och nya mjukvarumiljöer kan
+kräva program översätts till ett annat programspråk.
+
+Denna sammanläggningsavhandling undersöker avvägningen mellan prestanda och
+utvecklingskostnad för mjukvaruportering. Avhandlingen bygger på fallstudier i
+portering av operativsystem till multiprocessorer och verktygsstöd för
+portering av C- och C++-program till virtuella maskiner för Java. Två artiklar
+beskriver traditionell låsbaserad portering av ett uniprocessoroperativsystem,
+och undersöker övergången från ett "jättelås" som serialiserar all exekvering
+i kärnan till en mer finkorning låsstrategi. En helt annan strategi som
+fokuserar på låg utvecklingskostnad presenteras också i avhandlingen.
+
+Det andra huvudspåret beskriver Cibyl, en binäröversättare som översätter
+MIPS-binärer till Java-bytekod för mobiltelefoner. Målet med detta spår är att
+möjliggöra portering av C och C++-applikationer till virtuella Java-maskiner
+med låg utvecklingskostnad. Metoden bygger på att kompilera C/C++-källkod till
+en MIPS-binär som sedan översätts till körbar Javabytekod. I avhandlingen
+visas att denna metod är funktionell och har tillräckligt bra prestanda för
+att även vara användbar i på stora program i verkliga situationer.
+

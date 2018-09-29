@@ -1,0 +1,1103 @@
+% TODO
+% General introduction
+% - Some more work
+
+% MOSTLY DONE?
+% Less on MIPS translation
+% McCabe is not a devel. effort metric
+% Conclusions
+
+% DONE
+% Figures in paper III
+% Link to cibyl
+% Author / Title / published at to each paper
+% RQ -> Research question, PQ -> ...
+% SPEC -> The standard SPEC bmark
+% Moved descr before RQs
+% Fixup and read the copy-stuff from lic
+% RQ about LOPI
+% Contributions of each paper (copy from lic, add)
+
+\section{Background}
+The evolution of computer hardware and software moves very fast. In the
+hardware domain, storage capacity and processing performance increase at a
+high rate. For software, both the hardware evolution and requirements such as
+security, performance and maintainability drive the development of new languages,
+runtime environments, virtual machines and programming methodologies.
+
+Both hardware and software trends present problems when porting legacy
+software. On the hardware side, new hardware generations often require
+software porting to benefit from the improved hardware support, and this can
+often lead to significant refactoring of the existing code. In the software
+domain, new languages or devices locked to specific virtual machines present
+difficult problems for maintaining legacy software. In the worst case,
+software evolution could require porting to a different language.
+
+This thesis is centered around issues in maintaining legacy software through
+hardware changes and new software environments. Special focus has been placed
+on case studies in porting of operating system kernels to multiprocessors,
+where both traditional lock-based ports and alternative organizations have
+been explored, and tool support for porting C and C++ software to Java virtual
+machines.
+
+%\textbf{figure placing the papers in this thesis}
+
+%The rest of the introduction is structured as follows.
+%Section~\ref{sec:intro:mp} introduces the first topic, multiprocessor
+%operating system porting. Section~\ref{sec:intro:language_porting} then gives
+%an introduction to the second main topic of language porting.
+%Section~\ref{sec:intro:research_questions} presents the research questions in
+%the thesis and Section~\ref{sec:intro:research_methodology} talks about the
+%research methodology used. Section~\ref{sec:intro:contributions} then gives
+%the major contributions in this thesis, and Section~\ref{sec:intro:validity}
+%discusses the validity of the results. Related work is presented in
+%Section~\ref{sec:intro:related_work} and conclusions can be found in
+%Section~\ref{sec:intro:conclusions}.
+
+\section{Multiprocessor porting}
+\label{sec:intro:mp}
+The first main topic of this thesis is porting uniprocessor operating system
+kernels to multiprocessor architectures, discussed in
+Paper~\Roman{nr:smp-survey}-Paper~\Roman{nr:linux-appkern}. The main
+motivation for multiprocessor operating system porting is the current trend of
+moving to multithreaded and multicore processors, which necessitates a
+parallelized operating system to make use of the additional processing
+resources. The increased use of multithreaded and multicore processors are in
+turn motivated by physical constraints, mainly power usage and heat
+generation, making scaling with traditional means such as increased clock
+frequency difficult~\cite{mudge01power}.
+% FIXME: Add asymmetric
+
+The trend of parallelized processors has two main tracks. First, symmetric
+multithreading (SMT)~\cite{eggers97simultaneous} is an approach where
+processor resources are shared between two or more concurrently running
+program threads to allow more efficient use of processor resources. Symmetric
+multithreading has been implemented in, e.g., Intel Pentium 4 and Xeon
+processors~\cite{marr02hyperthreading} (branded as HyperThreading), and the
+2-way multithreaded Sony/IBM Cell processor~\cite{pham05cell}.
+
+The second track is chip multiprocessors (CMPs)~\cite{hammond97singlechip}.
+This approach partitions the chip area into two or more mostly independent
+processor cores. This means that in the CMP case, the processor resources are
+statically allocated to a core whereas the resources in an SMT are dynamically
+allocated to a processor thread. The argument for chip multiprocessors is
+similar to that for simultaneous multithreading: using many simple cores
+provides better energy efficiency and higher operating frequency than using
+one complex core.  Chip multiprocessors have been released by
+Intel~\cite{intel05multicore} and AMD~\cite{amd05multicore}, and the IBM
+POWER4 architecture was released as a dual-core chip in
+2001~\cite{kahle99power4}.
+
+Future microprocessors will in many cases contain elements of both the SMT and
+CMP approaches. For example, the IBM POWER5~\cite{kalla04power5} and the Sun
+Niagara and Niagara 2~\cite{kongetira05niagara, johnson07niagara2}
+architectures employ a combination of CMP and SMT technologies. Further, Intel
+chip multiprocessors (e.g., Intel Pentium processor Extreme Edition) also
+supports HyperThreading. As a result of these trends, a lot of future
+microprocessors will be small multiprocessors, and multiprocessors will thus
+be used in a large number of systems (also embedded) where uniprocessors were
+earlier prevalent.
+
+
+% Types of oses (more in papir 1): kernel seraialized, parallelized,
+% assymetric
+
+Developing programs for multiprocessors presents special problems. While
+program threading is possible on uniprocessor computers, truly concurrent
+program threads are only available on a multiprocessor. True concurrency can
+expose problems which never occurs on a uniprocessor, e.g., concurrent update
+of a shared variable. It also makes debugging more difficult since controlling
+other threads of execution is harder than on a uniprocessor and presents
+timing issues. Simulation can help alleviate some of these problems, but gives
+a slow-down and can also be difficult to use if there is specialized hardware
+present.
+
+Operating systems need to be adapted to work with the new multiprocessors. It
+is not possible to simply allow several processors to start executing in a
+uniprocessor operating system, since this would cause unpredictable behavior
+when processors concurrently modifies a data structure. Instead, mutual
+exclusion is needed in multiprocessor operating systems, e.g., through locking,
+so that a processor is stalled or redirected when trying to access a resource
+held by another processor.  For good performance, it is important that the
+mutual exclusion is fine-grained enough to avoid spending time waiting for
+other processors.
+
+However, making modifications to large software bodies such as operating
+system kernels is generally very hard.  For instance, Freeman L. Rawson III
+writes about this problem when developing the IBM Workplace
+OS~\cite{rawson97experience}, which was canceled after six years of
+development by a large team of engineers because of engineering problems and
+performance issues. In addition, operating system kernels are in many cases
+harder to develop and debug than other software systems because of
+non-predictability, limited library support, real-time issues, and hardware
+effects.
+
+There are performance issues associated with applications running in
+multiprocessor operating systems. First, a non-threaded application will not
+benefit from a multiprocessor. Second, applications can be categorized into
+two broad classes, \emph{compute bound} and \emph{system bound}, where compute
+bound applications spend most of their time executing application code and
+system bound applications spend a large proportion of their time in-kernel.
+Compute-bound applications are not dependent on the parallelization of the
+operating system kernel (since these spend little time in-kernel) and can
+therefore easier benefit from multiprocessors even on modestly parallelized
+operating systems. Third, there are theoretical limits to the performance
+obtainable from a multiprocessor. Amdahl's law~\cite{amdahl67validity} states
+that since all programs need to execute parts serialized (system calls,
+printouts, etc.), the highest speedup attainable with a given number of
+processors is:
+
+\begin{displaymath}
+  speedup = \frac{1}{t_{serial} + \frac{t_{parallel}}{\#processors}}
+\end{displaymath}
+
+With Amdahl's law, the maximum speedup theoretically possible is given by
+setting the number of processors to $\infty$. For example, with an application that
+spends 10\% of the time running serialized code, the maximum speedup is
+$\frac{1}{0.1 + \frac{0.9}{\infty}} = 10$, i.e., even a system with
+thousands of processors could never achieve more than a speedup of 10 compared
+to a uniprocessor. Amdahl's law also places constraints on processor design as
+even with a large number of cores, the performance of serialized execution is
+important for the overall speedup~\cite{emer07single}.
+
+
+Porting an operating system to a multiprocessor computer with good performance
+characteristics can therefore demand a tremendous effort, which can pose
+problems even to large organizations and experienced software developers. In
+this thesis, the tradeoff between performance and implementation effort for
+operating system kernels is therefore explored, focusing on techniques for
+reducing the development effort.
+
+\FloatBarrier
+
+\section{Language Porting}
+\label{sec:intro:language_porting}
+The second main topic of this thesis is porting between languages, discussed
+in Paper~\Roman{nr:cibyl} and \Roman{nr:cibyl-performance}. There are several
+reasons for porting programs to a different language. In some cases,
+language-level security can be the main motivation, in other, the platform
+might only support a specific language. This type of porting can be very
+difficult and time consuming depending on the languages involved, and because
+of this, it is an area where tool support can reduce development effort.
+
+% Goal: To maintain in new language, or to just run
+
+Of particular interest is porting of C and C++ programs to Java virtual
+machines. This category is important because of the very large body of
+programs and libraries written in C and C++, and the prevalence of Java
+virtual machines on platforms such as mobile phones. It can also be used to
+export C libraries to Java on host machines, which enables distribution of
+pure Java archives without the need to resort to calling native code. While
+the languages share much of the syntax, there are major differences between
+C/C++ and Java:
+
+\begin{itemize}
+\item Java enforces type-safety strictly, while it is easy to circumvent in
+  C/C++. Many C and C++ programs are also written with implicit dependencies
+  on allowing exceptions to type-safety.
+\item C/C++ allows pointers to arbitrary memory (even invalid), whereas Java
+  uses type-safe references
+\item Standard library support is also quite different, for example in how
+  file handling is implemented
+% More: (Memory image)
+\end{itemize}
+
+These things contribute to making this porting difficult and adds to the
+advantage of using tool support.
+
+\subsection{Comparison of porting tools}
+There are a number of different categories of tools that can be used when
+porting between languages:
+
+\begin{itemize}
+\item Source-to-source translators, which translate the source code of the
+  source language to source code of the destination
+  language~\cite{martin02ephedra, jazillan}.
+\item Machine emulation that provides an isolated runtime environment for an
+  unchanged program.
+\item A compiler backend to generate binaries for the target
+  language~\cite{axiomsol, cifuentes00UAB}.
+\item Binary translation that translates the source binary to binary code for
+  the target language (runtime), either online during runtime or offline
+  beforehand~\cite{hookway97fx32, bellard05qemu, alliet04nestedvm}.
+\end{itemize}
+
+Source-to-source translation can be beneficial when the goal is to switch
+language and maintain the code in the new language afterwards. However, in the
+case of C/C++, certain parts are inherently difficult to translate. For
+example, since pointers in C/C++ can point to any part of memory, it's
+difficult to translate these into Java bytecode in a meaningful way.
+Source-to-source translation is therefore less useful when the goal is to run
+the current software or to keep maintenance of the original source code.
+% Examples
+
+Emulation provides a way of keeping the original binary unchanged, but can
+require a large runtime environment and also limited performance. For
+resource-constrained embedded systems, the size of the runtime environment can
+be a major problem. Also, emulating every single instruction can in many
+cases make the program too slow for practical use.
+
+Writing a custom compiler backend for the target language / machine has the
+best performance potential, but can also be quite complex to implement. The
+target machine might also not always be a good match for the compiler. For
+example, since Java bytecode is typesafe, it is not possible to access memory
+through arbitrary types, which the compiler intermediate format might assume.
+
+Binary translation allows a binary for one architecture to be executed on
+another architecture, but without emulating every single instruction such as
+in the emulator case. Depending on how it's implemented and the architectures
+affected, binary translation can also be fairly efficient.
+Paper~\Roman{nr:cibyl} and Paper~\Roman{nr:cibyl-performance} describes
+Cibyl, which is a binary translator used for porting C/C++ programs to J2ME
+devices, and the rest of this section will focus on binary translation.
+
+\subsection{Binary translation}
+Binary translators can be further split in two main types: \emph{dynamic}
+binary translators, which perform the translation during runtime, and
+\emph{static} binary translators, which perform the translation beforehand. It
+is not possible to translate all binaries with static translation because of
+e.g., self-modifying code and unclear separation between code and data, but
+dynamic translation overcomes these problems. With binaries specifically
+targeted for translation, the limitation of static translation can be
+overcome.
+
+For the rest of the section, the focus will be on translating 32-bit MIPS
+binaries into Java bytecode. MIPS has been selected since it provides a set of
+advantages when translating to Java bytecode, which is further described below
+and in Paper~\Roman{nr:cibyl}. At first it might seem that the MIPS and Java
+bytecode architectures would be very different. MIPS is a traditional
+load/store register-based RISC architecture where arithmetic instructions
+always operate on 32-bit registers (two sources and one destination) and where
+only special load and store instructions can read and write to memory.
+Figure~\ref{fig:intro:mips} shows a section of annotated MIPS assembly.
+
+\begin{figure}[htb]
+  \centering
+  \footnotesize
+\begin{verbatim}
+1:    lw      v0,16(a0)   # Load 32-bits from mem[a0 + 16] into register v0
+      ...
+      slt     v0,a1,t1    # v0 = a1 < t1
+      bnez    v0, 1b      # if v0 != 0 then goto 1
+      sll     v1,a1,0x2   # v1 = a1 << 2
+      li      a1,-1       # a1 = -1
+      jr      ra          # Jump to address in ra
+      move    v0,a1       # v0 = a1, delayed instruction, executed
+                          # in pair with the last instruction
+\end{verbatim}
+  \caption[Sequence of MIPS instructions]{A sequence of MIPS instructions.
+    Text after the '\#' sign denotes comments.}
+  \label{fig:intro:mips}
+\end{figure}
+
+Java bytecode~\cite{lindholm99jvm} is on the other hand based on a stack
+machine where arithmetic operations are performed on elements on an operand
+stack and pushed back as results. Apart from the operand stack, Java bytecode
+also has local variables, which provides register-like storage for temporary
+values (and automatic variables for high-level Java code), and class member
+variables and static class variables. Local variables are further used to pass
+arguments to functions, and the first local variables - corresponding to the
+number of arguments passed - are used as function arguments.
+Figure~\ref{fig:intro:jbc} illustrates an annotated sequence of Java bytecode
+instructions.
+
+\begin{figure}[htb]
+  \centering
+  \footnotesize
+\begin{verbatim}
+      iload 5                       ; push local variable 5 on the stack
+      iconst_0                      ; push constant 0 on the operand stack
+      getstatic CRunTime/memory [I  ; push reference to the CRunTime.memory
+                                    ; int vector on the operand stack
+      iload 18                      ; push local variable 18 on the operand stack
+      iconst_2                      ; push constant 2 on the operand stack
+      iushr                         ; push var 18 >> 2 on the stack (popping
+                                    ; two items and pushing the result)
+      iload 5                       ; push local variable 5 on the stack
+      iastore                       ; CRunTime.memory[var 18 >> 2] = var 5
+      if_icmpne L_fwd               ; if var 5 != 0 then goto L_fwd
+      ...
+L_fwd:
+\end{verbatim}
+  \caption[Sequence of Java bytecode instructions]{A sequence of Java bytecode
+    instructions in Jasmin~\cite{jasmin} syntax. Text after the ';' sign
+    denotes comments.}
+  \label{fig:intro:jbc}
+\end{figure}
+
+Java bytecode is designed with security in mind. The bytecode is strictly
+typesafe and there are 8-bit \emph{bytes}, 16-bit \emph{shorts}, 32-bit
+\emph{integers}, 64-bit \emph{longs}, 32-bit \emph{floats} and 64-bit
+\emph{doubles}, all of which are signed. Arithmetic operations on elements on
+the operand stack must be performed on two elements of the same type, and the
+operand must otherwise be converted manually with a special instruction (for
+example \texttt{i2l} which sign-extends an integer to a long. The type must
+always be known, which is also the case for local variables and it is
+therefore not allowed to read a local variable before it has been assigned.
+For each location in the program, these rules must hold for every possible
+path to the location.
+
+The bytecode is itself not trusted and the Java virtual machine will verify it
+at startup to see that none of the rules are breached. For the more
+constrained J2ME JVMs, the verification is instead done in a
+\emph{preverifier} beforehand. The virtual machine will throw an exception if
+incorrect bytecode is loaded.
+
+Because of the security features and the stack-oriented operation, Java
+bytecode is clearly different from MIPS assembly. Even so, the 32-bit MIPS
+architecture provide certain benefits as a base for translating in general and
+to Java bytecode in particular:
+
+\begin{itemize}
+\item Both architectures are big-endian, which simplifies in-memory data
+  layout
+\item MIPS instructions generally have no side-effects, i.e., do not affect
+  flags registers etc. This simplifies each instruction translation since only
+  one register need to be updated with a simple write.
+\item There is no use of partial registers (e.g., updating a single byte of a
+  four byte register)
+\item Unaligned memory access can only be done through special instructions
+\end{itemize}
+
+There are also some problems with translation to Java bytecode from MIPS
+binaries. The first problem is general when performing static translation to
+Java bytecode, code is generated beforehand and self-modifying code or
+execution of data as code can therefore not be supported. This is only used in
+a very limited set of programs, and typically not a problem for programs
+written in high-level languages.
+
+The second and most difficult problem is memory access. Because the binary
+translator has no control over pointers, translation effectively mandates that
+memory is represented by a vector in Java, either in a two-level scheme as in
+NestedVM~\cite{alliet04nestedvm} or through a flat scheme as in Cibyl. Memory
+is opaque in MIPS assembly, i.e., any address can be accessed at any size
+(byte, short, integer) providing the address is aligned on a natural boundary,
+whereas Java bytecode does not allow this because of the type safety. This
+problem can be solved in different ways: either memory accesses can always be
+done at byte-level, reading multiple bytes and combining them to form the
+result, or it can be done at a larger size (e.g., 32-bit words), masking out
+parts of the word for byte and short access. Chapter~\ref{cha:cibyl} describes
+solutions to these translation problems, while
+Chapter~\ref{cha:cibyl-performance} outlines optimizations to improve the
+performance of the translated code.
+
+\section{Research Questions}
+\label{sec:intro:research_questions}
+
+\begin{itemize}
+\item \textbf{Primary research question}: How can a good tradeoff between
+  performance and development effort be found when moving software across
+  hardware or language boundaries?
+\end{itemize}
+
+All papers in the thesis deal with different aspects of this question.
+Papers~\Roman{nr:smp-survey}-\Roman{nr:linux-appkern} are all related to
+operating system porting from uniprocessor to multiprocessor architectures.
+Papers~\Roman{nr:cibyl} and \Roman{nr:cibyl-performance} directly address the
+problem of porting to new language environments, specifically migration of
+legacy C/C++ code to Java virtual machines. Paper~\Roman{nr:lopi} investigates
+efficient binary instrumentation, a similar technique to the binary
+translation in papers~\Roman{nr:cibyl} and \Roman{nr:cibyl-performance}, and
+can be used as a debugging tool for development.
+
+\begin{itemize}
+\item \textbf{Research question 1, traditional}: What is the cost and
+  performance benefit of performing a traditional symmetric lock-based
+  multiprocessor port of an operating system kernel?
+\end{itemize}
+This question is discussed in Paper~\Roman{nr:smp-survey},
+Paper~\Roman{nr:tsp-giant-lock} and Paper~\Roman{nr:tsp-coarse}.
+Paper~\Roman{nr:smp-survey} contains an overview of different multiprocessor
+porting approaches, and Paper~\Roman{nr:tsp-giant-lock} describes the
+implementation of a giant locking scheme in an operating system kernel. This
+implementation is then further improved in Paper~\Roman{nr:tsp-coarse}. Having
+discussed the traditional approaches, the next goal was to explore the
+development effort needed to port an operating system. The next question
+relates to these alternative organizations:
+
+\begin{itemize}
+\item \textbf{Research question 2, alternative multiprocessor organizations}:
+  What are the lower limits of development effort when performing a
+  multiprocessor port of an operating system kernel?  Can multiprocessor
+  support be added to the operating system without modifying the original
+  kernel?
+\end{itemize}
+
+The second research question is investigated in Paper~\Roman{nr:smp-survey}
+and Paper~\Roman{nr:linux-appkern}. Paper~\Roman{nr:smp-survey} discuss
+different approaches to multiprocessor operating systems, while
+paper~\Roman{nr:linux-appkern} describe the asymmetric application kernel
+approach.
+
+\begin{itemize}
+\item \textbf{Research question 3, application instrumentation}: How can
+  perturbation and runtime overhead caused by binary instrumentation be
+  reduced?
+\end{itemize}
+
+Paper~\Roman{nr:lopi} focuses on this question. This technique can be used to
+support software porting and debugging, and is also technically closely
+related to binary translation.
+
+\begin{itemize}
+\item \textbf{Research question 4, binary translation}: How can binary
+  translation be employed to facilitate porting of C/C++ applications to a
+  Java runtime environment?
+\end{itemize}
+
+Paper~\Roman{nr:cibyl} and Paper~\Roman{nr:cibyl-performance} discuss
+different aspects of this question, focusing on techniques and performance.
+
+\section{Research Methodology}
+\label{sec:intro:research_methodology}
+In this thesis, there are two basic issues: performance and development
+effort.  To address the first issue, a quantitative benchmark-based approach
+has been used. In our studies, a combination of application benchmarks and
+synthetic benchmarks has been used for the performance evaluations.
+Theoretical analysis, which serves to establish performance limits, has also
+been employed in some cases.  The benchmarks have been run either in the
+Simics full system simulator~\cite{simics} or on real hardware.  When
+evaluating development effort, time has been used as the premier attribute,
+but there are also measurements of code properties e.g., number of code
+lines and McCabe cyclomatic complexity~\cite{fenton98swmetrics}.
+
+\subsection{Performance Evaluation}
+Generally, scripted application benchmarks are used to measure the performance
+of a real application with specified input and output~\cite[page
+27]{hennessy03computer}. Synthetic benchmarks (or micro benchmarks), on the
+other hand, measure specific parts of an execution such as the time required
+for a system call.
+
+For the evaluations, a combination of the standard benchmarks SPEC
+CPU~2000~\cite{spec2000}, SPLASH~2~\cite{cameron95splash}, more specialized
+benchmarks such as Postmark~\cite{katcherpostmark}, and custom synthetic
+benchmarks has been used. SPEC CPU~2000 contains a set of mainly compute-bound
+single-threaded benchmarks which is often used in computer architecture
+research, compiler research, and computer systems performance evaluation.
+SPLASH~2 is a benchmark suite with parallel scientific applications commonly
+used when evaluating multiprocessor performance. As the SPEC applications are
+single-threaded, they will generally not benefit from running on a
+multiprocessor machine unless run in a multiprogramming setting. Most of the
+SPLASH benchmarks, on the other hand, scale well on multiprocessor machines.
+
+The MinneSPEC reduced workloads~\cite{minnespec} has been used to decrease the
+simulation time of SPEC CPU 2000. The MinneSPEC workloads are constructed to
+have similar characteristics as the full workloads, although recent work have
+shown that periodic sampling gives a closer correspondence to the full
+workloads~\cite{yi05techniques}.
+
+Since both SPEC and SPLASH are compute-bound, the operating system will have
+only minor influence on the performance. In contrast, the
+Postmark~\cite{katcherpostmark} benchmark is a mainly system bound benchmark.
+Postmark models the behavior of a mail server, focusing on the performance of
+many small files.  Since file system operations to a large extent are handled
+in-kernel, Postmark will spend a significant time executing kernel code. The
+parallelization of the operating system kernel is therefore very important
+when running the Postmark benchmark, and only highly parallel operating system
+kernels will scale well with this benchmark.
+
+In some cases it has not been possible to use standard benchmarks. For example
+we measure the latency of a~``null''~system call in
+Chapter~\ref{cha:linux-appkern}, and for this we use a custom synthetic
+benchmark measuring that particular operation. Further, in
+Chapter~\ref{cha:tsp-giant-lock}, it was not possible to use standard
+benchmarks because of the specialized platform, and configuration problems
+also prohibited the use of normal applications on the operating system.
+Instead, we constructed a custom application with one thread per processor
+that makes it possible to measure performance during varying system call load,
+showing how the parallelization of the kernel affects performance.
+
+In Chapter~\ref{cha:lopi}, we use application benchmarks to compare different
+instrumentation techniques. The application benchmarks measure the aggregate
+behavior of the SPEC applications during the entire run. We measure the number
+of instructions executed, cache accesses and misses as well as branches and
+branch prediction misses. The measurements were performed on real hardware.
+
+Chapter~\ref{cha:cibyl} and Chapter~\ref{cha:cibyl-performance} use multiple
+different benchmarks to show different characteristics. The Mediabench
+benchmark suite~\cite{lee97mediabench} is used to compare the performance of
+Cibyl to execution on the native host machine (i.e., the overhead of
+translated C code compared to native C). We also evaluate two custom written
+benchmarks, an A* implementation and Game of life, with which we compare
+native Java to the Cibyl-translated binary. Finally, a real-world benchmark, a
+GPS navigation application, is used to examine the impact of Cibyl
+optimizations.
+
+\subsection{Development Effort Measurement}
+Development effort has primarily been evaluated through working hours and lead
+time. Chapters~\ref{cha:tsp-giant-lock}, \ref{cha:tsp-coarse} and
+\ref{cha:linux-appkern} contain this kind of evaluations. The evaluation
+reports the number of developers involved, and the time it took to perform the
+design and implementation.
+
+To give further indications of development effort and code complexity, McCabe
+cyclomatic complexity has been used.  McCabe cyclomatic complexity measures
+the possible number of paths through a function, which is a measure of how
+complex the function is to understand and analyze. Generally, the fewer paths
+through a function, the fewer test cases are needed to test the
+function~\cite{fenton98swmetrics}. The McCabe cyclomatic complexity has been
+measured with the \texttt{Pmccabe} tool~\cite{pmccabe}.
+
+The number of source code lines can also give an indication of the development
+effort. Except where otherwise stated, the \texttt{sloccount}~\cite{sloccount}
+tool by David A. Wheeler, which counts comment-free lines of source code in
+many languages, has been used.
+
+
+\section{Contributions of this thesis}
+\label{sec:intro:contributions}
+In this section, the papers in the thesis are discussed together with the
+contributions made in each paper.
+
+\subsection{Chapter~\ref{cha:paper1} (Paper~I)}
+% Purpose/description
+Chapter~\ref{cha:smp-survey} presents an investigation of scalability and
+development effort for operating system kernels. The purpose of this paper is
+to explore the tradeoff between these two quality attributes in the context of
+operating system kernels, specifically when porting a uniprocessor kernel to
+multiprocessor hardware. In this paper, we identify seven technical approaches
+for performing a multiprocessor port and discuss these in the context of
+performance and development effort. Further, we perform a case study of how
+Linux multiprocessor support has evolved in terms of performance and
+development effort for four different versions of the Linux kernel.
+
+% Contributions
+The main contribution of this paper is the categorization of technical
+approaches for operating system kernels and also a discussion of the
+scalability and development effort for these. In the paper, we argue that the
+technical approach has a significant effect on the development effort, ranging
+from approaches with very low effort such as the approach we present in
+Paper~\Roman{nr:linux-appkern} to complete reimplementations with very high
+implementation complexity. In the same way, the achieved performance will vary
+according to the chosen approach, and generally the expected pattern of higher
+development effort correlating with higher scalability holds. We base the
+results on a substantial literature study and a case study of the Linux
+operating system.
+
+% Research question
+This paper connects directly to the main research question, regarding the
+performance and development effort tradeoff in multiprocessor operating system
+ports, with the paper discussing different technical approaches to operating
+system porting.  Further, it also relates to research questions 1 and 2,
+\emph{traditional} and \emph{alternative multiprocessor organizations}, on a
+higher level, since it gives an overview of both traditional and alternative
+systems. The paper is also a foundation for papers~II-IV, which discuss these
+two more specific research questions.
+
+\subsection{Chapter~\ref{cha:paper2} (Paper~II)}
+% Purpose/description
+In Chapter~\ref{cha:tsp-giant-lock}, the design and implementation of
+multiprocessor support for a large industrial operating system kernel using a
+traditional porting approach is presented. The main purpose of this paper is
+to discuss the design options and issues faced when doing the initial port of
+a full-scale operating system kernel to multiprocessor hardware. The port is
+implemented using a ``giant'' lock which serializes kernel execution. In the
+paper, we present implementation details, an initial evaluation of the
+implementation, and experiences we gained from the implementation.
+
+% Contributions
+There are two main contributions in this paper.  First, we illustrate
+technical solutions to common problems found in multiprocessor ports.
+For example, we use an approach for processor-local data based on virtual
+memory mapping which makes it possible to keep most of the uniprocessor code
+unchanged. This approach has a few problems related to multithreaded
+processes, and the paper presents a solution to these problems with minimal
+changes to the original kernel. The second contribution is a discussion of the
+experiences we gained from the implementation. Although we chose a simple
+approach, the implementation still required around two years, which was more
+time than we had expected.  The main reason for this is the large code-base,
+which meant that we had to spend a lot of time understanding the structure
+and implementation of the system. Further, the system is highly specialized
+and employs a complex configuration process which required us to spend time on
+getting the environment to work.
+
+% Research question
+With this paper, we discuss the \emph{traditional} research question (research
+question 1).  The paper provides implementation experiences from a traditional
+port, which was harder to implement than we had expected. The paper also
+connects to the main research question.
+
+\subsection{Chapter~\ref{cha:paper3} (Paper~III)}
+% Purpose/description
+The next paper presents an incremental improvement to the results presented in
+Paper~\Roman{nr:tsp-giant-lock}. This paper describes further work on the
+multiprocessor port where the locking scheme is relaxed to use coarse-grained
+subsystem locks together with fine-grained locks for core data structures.
+While the work builds on Paper~\Roman{nr:tsp-giant-lock}, it was implemented
+with a larger development team.
+
+% Contributions
+The main contribution of this paper is a description of the problems faced
+when moving from a multiprocessor port with serialized kernel execution to one
+where the kernel is parallelized. The paper also details solutions to the
+design challenges and illustrates difficulties in porting operating system
+kernels to multiprocessor architectures. This implementation required less
+time than the giant-locked prototype, which can be attributed to the larger
+development team and reuse of the work done on the previous prototype.
+
+% Research question
+In this paper, the \emph{traditional} research question (research question 1)
+is again illustrated. The main research question also connects to this work.
+
+\subsection{Chapter~\ref{cha:paper4} (Paper~IV)}
+% Purpose/description
+The traditional approaches we used in Paper~\Roman{nr:tsp-giant-lock} and
+Paper~\Roman{nr:tsp-coarse} allowed us to successfully port a large industrial
+operating system kernel, but at the cost of long implementation time.
+Chapter~\ref{cha:linux-appkern} presents an alternative approach, the
+\emph{application kernel approach}. The application kernel approach provides a
+way of adding multiprocessor support without changing the original
+uniprocessor kernel. The approach achieves this by running two kernels in
+parallel, the original uniprocessor kernel on one processor and a custom
+kernel on all other processors. The paper describes an implementation of the
+application kernel for Linux, which shows that the approach is feasible in a
+real-world setting. We need no changes to neither the Linux kernel nor the
+applications.
+
+% Contributions (results)
+The main contribution from Paper~\Roman{nr:linux-appkern} is that we show that
+it is possible and feasible to add multiprocessor support to an operating
+system with minimal changes to the original operating system. We also evaluate
+the application kernel approach in terms of performance and implementation
+complexity, where we show that the application kernel is comparable in
+performance to Linux for compute-bound applications. We therefore conclude
+that the application kernel approach would be a viable alternative for
+multiprocessor ports of complex operating systems focusing on computationally
+intensive applications.
+
+% Connect to research question
+Paper~\Roman{nr:linux-appkern} discusses the research question about
+\emph{alternative organizations}, showing that alternative organizations can
+provide significant advantages in terms of implementation effort. It also
+connects directly to the main research question, focusing on an approach with
+low development effort.
+
+\subsection{Chapter~\ref{cha:paper5} (Paper~V)}
+% Purpose/description
+Chapter~\ref{cha:paper5} describes the LOPI framework for program
+instrumentation. LOPI is a generic framework for low overhead instrumentation
+of program binaries.  LOPI allows arbitrary instrumentation to be added to the
+program binary, e.g., performance measurements or path profiling. In LOPI, we
+provide a number of low-level optimizations to reduce the perturbation caused
+by the instrumentation framework. For example, LOPI tries to improve cache
+locality by reusing instrumentation code whenever possible. With these
+optimizations, LOPI is able to perform significantly better than the
+Dyninst~\cite{buck00dyninst} instrumentation package.
+
+% Contributions (results)
+The main contribution of Paper~\Roman{nr:lopi} is that we show how a number
+of low-level optimizations can be used to improve program instrumentation
+perturbation. LOPI also provides the possibility of automatically adding tests
+or performance measurements to large software packages without changing the
+source code, or even having access to the source code. We believe that
+optimizations such as these can improve the accuracy of measurements and
+experiments performed using instrumentation.
+
+% Connect to research question
+In this paper, we discuss the research question about \emph{application
+  instrumentation}, research question 3. This also connects to the main
+research question in that support tools are vital components when working on
+large software packages such as operating systems.
+
+\subsection{Chapter~\ref{cha:paper6} (Paper~VI)}
+% Purpose/description
+In Chapter~\ref{cha:cibyl}, the design and implementation of Cibyl, a binary
+translator targeting J2ME devices is presented. Cibyl targets the problem of
+porting C and C++ applications to J2ME devices, which only support a Java
+runtime environment and therefore makes it difficult to port code written in
+other languages. Cibyl overcomes this problem by using the standard GCC
+compiler to produce MIPS binaries and thereafter translating these into Java
+bytecode.
+
+% Contributions
+There are two main contributions of Paper~\Roman{nr:cibyl}. First, the paper
+shows how binary translation can be used to target the problem of program
+portability successfully. Cibyl has been used to port fairly large
+applications to J2ME devices with modest performance overhead in a mostly
+automated way. Apart from the binary translation, a generated interface to
+Java bytecode is used to provide platform support. Second, the paper
+illustrates how the MIPS ABI and extensions to the MIPS ISA can be used to
+provide more efficient translation.
+
+% Connect to research question
+This paper discusses the \emph{binary translation} research question (research
+question 4), focusing on the technology and design choices made. The primary
+research question also relates to this paper from side of language boundaries.
+
+\subsection{Chapter~\ref{cha:paper7} (Paper~VII)}
+% Purpose/description
+Chapter~\ref{cha:cibyl-performance} is an extension of the work performed in
+Paper~\Roman{nr:cibyl}. This paper discusses optimizations performed in the
+Cibyl binary translator and provides a more extensive performance study than
+in Paper~\Roman{nr:cibyl}. It also presents a set of new optimizations not
+present in Paper~\Roman{nr:cibyl}.
+
+% Contributions
+The main contribution of this paper is to illustrate how optimizations can
+improve the performance of translated code. Since the high-level code is
+already optimized, the focus of Cibyl optimizations is to reduce the overhead
+of translation. Constant propagation of register values, function co-location
+and a peephole optimizer are used to this effect. The second contribution of
+this paper is a performance study where Cibyl is compared to
+NestedVM~\cite{alliet04nestedvm} and native Java. Cibyl performance is found
+to be close to native Java for the cases we target, and optimizations improve
+performance significantly.
+
+% Connect to research question
+As Paper~\Roman{nr:cibyl}, this paper discusses the \emph{binary translation}
+research question (research question 4) but focusing on the performance side
+of it. It also connects to the main research question from the side of
+language porting.
+
+\section{Validity of the Results}
+\label{sec:intro:validity}
+This section presents a number of threats to the validity of the studies. The
+discussion is centered around threats to the generalizability (or external
+validity) and the internal validity.
+
+\subsection{Generalizability, External Validity}
+External validity refers to the possibility of generalizing the study results
+in a setting outside of the actual study~\cite[page 106]{robson02realworld}.
+There are two threats to the generalizability of the work which are
+applicable to all papers in this thesis. One dimension is hardware, i.e., if
+the results are generalizable to larger hardware configurations or portable to
+entirely different platforms. The other dimension is software, i.e., if the
+results are generalizable to other software platforms.
+
+The hardware generalizability is addressed in several ways. First,
+Paper~\Roman{nr:lopi} describes low-level optimizations which are closely tied
+to the target hardware and therefore hard to port and generalize. In this
+case, this is inherent in the approach since the optimizations are
+intentionally system dependent. Paper~\Roman{nr:linux-appkern},
+Paper~\Roman{nr:tsp-giant-lock}, and Paper~\Roman{nr:tsp-coarse}, describe
+multiprocessor ports of two operating system kernels, both targeting Intel
+IA-32.  While many low-level aspects of these ports are architecture-specific,
+e.g., startup of secondary processors, most of the code (locking, etc.) is
+common between architectures which makes most of the results valid for other
+architectures as well. The application kernel approach presented in
+Paper~\Roman{nr:linux-appkern} poses a set of requirements on the
+architecture, e.g., processor-local interrupt handlers. These requirements are
+discussed for different architectures, and in most cases these are trivially
+fulfilled. It is therefore likely that the application kernel can be easily
+ported to a large set of hardware platforms.
+
+Hardware scalability threats has been further addressed by using the Simics
+full-system simulator~\cite{simics} to simulate hardware configurations with
+between one and eight processors. Simics gives the possibility to test larger
+configurations than the available hardware, and is used to examine the
+scalability in Paper~\Roman{nr:smp-survey} and Paper~\Roman{nr:linux-appkern}.
+Further, Simics has been used in Paper~\Roman{nr:lopi} to study detailed
+application behavior, which is hard or impossible using traditional hardware
+measurements.
+
+To improve the software generalizability, standard benchmarks such as SPEC CPU
+2000, SPLASH 2, and Postmark have been employed in
+Paper~\Roman{nr:smp-survey}, Paper~\Roman{nr:linux-appkern} and
+Paper~\Roman{nr:lopi}. Using standard benchmarks allow the studies to be
+replicated and also to be compared with other similar studies.  It is also
+shown that the application kernel approach is fairly independent of the
+original uniprocessor kernel, since most of the code from an in-house kernel
+implementation could be reused for the Linux port of the application kernel.
+This suggests that the application kernel approach should be possible to reuse
+mostly unmodified for ports to other operating systems.
+
+The specialized benchmarks used in Paper~\Roman{nr:tsp-giant-lock},
+Paper~\Roman{nr:cibyl} and Paper~\Roman{nr:cibyl-performance} are harder to
+generalize. Still, since the benchmark in Paper~\Roman{nr:tsp-giant-lock} is
+very basic, measuring the parallelization of the operating system kernel, it
+is still possible to compare to similar benchmarks on other operating systems.
+However, since it was not possible to run full-scale applications, it is
+difficult to generalize the performance results to a production environment.
+
+In Paper~\Roman{nr:cibyl-performance}, two specialized benchmarks are used,
+one being an implementation of the A* algorithm and the other
+FreeMap~\cite{shabtai07roadmap}, a GPS navigation software. The A* algorithm
+implementation is used to be able to compare the same software across
+different languages (C and Java) since it is implemented in the same way on
+both places. The A* implementation also allows comparison between different
+data structure layouts. FreeMap is used to provide performance characteristics
+of a real-world benchmark. The A* benchmark provides an indication of
+performance limits of the Cibyl implementation while the FreeMap benchmark
+should be generalizable to the same class of graphical applications.
+
+\subsection{Internal Validity}
+Internal validity refers to how well a study can establish the relationship
+between cause and effect~\cite[page 103]{robson02realworld}. For example, in a
+performance comparison between two versions of a multiprocessor operating
+system kernel (which was done for the Linux kernel in
+Paper~\Roman{nr:smp-survey}), a finding might be that the later version of the
+kernel has better performance.  However, it is not possible to draw the
+conclusion that this is because of improved multiprocessor support in the
+newer version since other factors such as a better file system implementation,
+optimized virtual memory handling, etc., also affects performance. In
+Paper~\Roman{nr:smp-survey}, the Linux kernel performance results is therefore
+normalized against a baseline of uniprocessor performance in the 2.0 kernel.
+The benchmark also shows that the performance, even on the uniprocessor, is
+around three times higher on 2.6 than on 2.0 for the same benchmark.
+
+One validity concern for the work is the use of a full-system simulator
+compared to real hardware. If the simulator is not accurate enough, the
+results will diverge from real hardware. There are two aspects of this. First,
+the Intel IA-32 instruction set is very complex to simulate accurately,
+compared to many RISC architectures. On current processors, IA-32 instructions
+are split up in RISC-like micro instructions~\cite{intel02sdm1} before they
+are executed, and the actual microcode implementation can vary greatly between
+different implementations of the architecture. Although Simics simulates
+microcode for the Pentium 4, the available hardware at the time of the
+experiments (Pentium~Pro, Pentium~II, and Pentium~III) is quite different from
+Pentium 4 and microcode simulation was therefore not employed.
+
+The second aspect is cache simulation. Since main memory is several magnitudes
+slower than the processor, caches that store frequently used data are needed
+to hide memory latency~\cite{hennessy03computer}. A miss in the cache can
+stall the processor for significant durations. For multiprocessors, another
+source of latency is traffic to keep the cache contents on different
+processors coherent. Simics can simulate the complete memory hierarchy
+including caches and coherence traffic. In Paper~\Roman{nr:lopi}, memory hierarchy
+simulation has been used to show detailed behavior of the instrumentation of
+SPEC applications (Section~\ref{sec:lopi:measurements} in
+Paper~\Roman{nr:lopi}), whereas measurements on real hardware were used to
+get aggregate values.
+
+In Paper~\Roman{nr:linux-appkern}, the memory hierarchy was not simulated
+since the purpose of the simulations have been to show scalability limits.
+There are known performance issues with the application kernel prototype
+related, e.g., to memory layout, which are not implemented and would give a
+disproportionally large disadvantage in the cache simulation.
+
+The benchmarks in Paper~\Roman{nr:cibyl} and \Roman{nr:cibyl-performance}
+targeting J2ME devices are performed in an emulated environment, the Sun J2ME
+emulator which builds on the Sun K virtual machine~\cite{sun00kvm}. Since the
+target domain is mobile phones, there can be some differences compared to
+running on actual hardware which may run other JVMs and have different
+implementations of support libraries. Where possible, the benchmarks have
+therefore been run on a set of different JVMs, which have different
+performance characteristics. The general tendency is possible to discern from
+these tests, although actual numbers will vary between devices.
+
+Reproducibility, the ability of other researchers to reproduce the results, is
+another important aspect. For the papers in this thesis, this has been
+adressed in two ways. First, there are detailed descriptions in each paper of
+how the experiments have been performed. Second, the source code for the work
+in Papers \Roman{nr:linux-appkern}, \Roman{nr:lopi}, \Roman{nr:cibyl} and
+\Roman{nr:cibyl-performance} is freely available for download and inspection.
+
+\section{Related work}
+\label{sec:intro:related_work}
+The related work has been divided after the subsidiary research questions.
+Since Paper~\Roman{nr:smp-survey} contains both traditional multiprocessor
+ports and alternative organizations, this paper is discussed in the context of
+the corresponding subsidiary questions.
+
+% FIXME: Try to find something common for all
+
+\subsection{Traditional Multiprocessor Ports}
+The traditional giant locking organization used in
+Paper~\Roman{nr:tsp-giant-lock} has been used in a number of other systems.
+For example, early versions of Linux and FreeBSD both used a giant locking
+approach~\cite{beck98linux, lehey03freebsd}. Similarly, many operating systems
+have gone through phases with subsystem locks like in
+Paper~\Roman{nr:tsp-coarse}, including Linux. As discussed in
+Paper~\Roman{nr:smp-survey}, the giant locking approach is a feasible approach
+for initial multiprocessor ports since it is relatively straightforward to
+implement and also possible to incrementally enhance by making the locks more
+fine-grained.
+
+The system used in Paper~\Roman{nr:tsp-giant-lock} and
+Paper~\Roman{nr:tsp-coarse} is a cluster operating system kernel running on
+IA-32 hardware, and there exists other similar systems. While generic
+operating system kernels such as Linux~\cite{beowulf},
+Windows~NT~\cite{microsoft05cluster} and Sun Solaris~\cite{sun99cluster} have
+been used to build cluster systems, there are fewer dedicated operating system
+kernels for clusters. One example of such a system is
+Plurix~\cite{goeckelmann03plurix}. Plurix is a kernel which, like the system
+presented in Papers \Roman{nr:tsp-giant-lock} and \Roman{nr:tsp-coarse},
+employs distributed objects which are kept coherent through a
+transaction-based scheme. However, Plurix only runs on uniprocessor nodes and
+is also based on Java, whereas the multiprocessor port in Papers
+\Roman{nr:tsp-giant-lock} and \Roman{nr:tsp-coarse} supports both Java and C++
+development.
+
+\subsection[Alternative Operating System organizations]{Alternative Multiprocessor Operating System Organizations}
+The work in Paper~\Roman{nr:linux-appkern} has several connections to other
+work. First, there is other work done related to employing restricted
+knowledge in systems. For example, Arpaci-Dusseau et
+al.~\cite{arpacidusseau01information} propose a method where
+``gray-box''~knowledge about algorithms and the behavior of an operating
+system is used to acquire control and information about the system without
+explicit interfaces or operating system modification. This idea is similar to
+Paper~\Roman{nr:linux-appkern} in that it restricts the information needed
+about the kernel to knowledge about the algorithms, but it differs in the
+intended purpose: controlling operating system behavior compared to adding
+multiprocessor support. Zhang et al.~\cite{zhang03qos}, have done work where
+the operating system kernel is modified to provide quality of service
+guarantees to large unmodified applications. This work takes the opposite
+approach to Paper~\Roman{nr:linux-appkern}: the kernel is explicitly modified
+to suit applications while the approach in Paper~\Roman{nr:linux-appkern}
+avoids modifying the kernel and actually needs no modifications to the
+applications either.
+
+Second, the technical approach described in Paper~\Roman{nr:linux-appkern} is
+related to older operating system kernels organized as master-slave systems
+and to certain distributed systems. For example, Goble and
+Marsh~\cite{goble82dualvax} describe the hardware and software implementation
+of a master-slave VAX multiprocessor. Because of the emergence of
+heterogeneous multiprocessors, there has been renewed interest in master-slave
+systems recently~\cite{seo07masterslave}. Paper~\Roman{nr:linux-appkern} uses
+the same structure as master-slave systems in that it restricts kernel
+operations to one processor.  However, master-slave systems modify the
+original kernel to add the multiprocessor support whereas the application
+kernel approach adds the support outside of the original kernel.
+
+The MOSIX distributed system~\cite{mosix}, which provides support for
+distributing standard applications transparently on a cluster, also uses an
+approach similar to the application kernel. MOSIX redirects kernel operations
+to the ``unique home node''~of an application to provide a single-system image
+cluster.  The approach in Paper~\Roman{nr:linux-appkern} works the same way,
+but on a multiprocessor computer instead of a cluster.
+
+%Cell processor: similar idea to appkernel
+%\url{http://www.research.scea.com/research/html/CellGDC05/26.html}
+
+\subsection{Program Instrumentation}
+There are several instrumentation tools which share properties with LOPI.
+First, there are a number of tools which directly employ binary rewriting
+similar to LOPI. For example, Etch~\cite{etch} is a tool for rewriting Windows
+binaries on the IA-32 architecture, which like LOPI has to deal with the
+complexities of an instruction set with variable-sized instructions.
+EEL~\cite{eel} and ATOM~\cite{atom} also rewrite binaries, but have been
+constructed for the SPARC and Alpha architectures, respectively, which use
+fixed-sized instructions and are therefore better adapted to instrumentation.
+Both EEL and ATOM provide frameworks to build tools to instrument programs,
+unlike LOPI which only provides basic instrumentation since the purpose of
+LOPI is to provide low-level support for building instrumentation tools.
+
+Dyninst~\cite{buck00dyninst}, Valgrind~\cite{valgrind} and Pin~\cite{luk05pin}
+use a different approach than LOPI for the instrumentation. These tools allow
+programs to be dynamically instrumented, i.e., adding instrumentation to the
+program in-memory after the program has been started. Valgrind works by
+dynamically translating all instructions of the program, inducing a high
+overhead but being general and allowing many program transformation. Although
+LOPI only instruments binaries, the optimizations performed by LOPI is
+applicable to dynamic instrumentation as well.
+
+% Add simics...
+
+\subsection{Binary translation}
+Binary translation, as used in Cibyl, is also closely related to the binary
+instrumentation in LOPI. Of other related work,
+NestedVM~\cite{alliet04nestedvm} (which has been discussed earlier) is clearly
+the most similar to Cibyl, also being a static off-line binary translator
+targeting Java bytecode. Valgrind~\cite{valgrind} is a dynamic binary
+translator which targets debugging and inspection support, e.g., through a
+heap management checker, and uses similar techniques as Cibyl.
+
+A traditional problem in static binary translators is separating code from
+data~\cite{altman00welcome}, i.e., detecting if a part of the binary executes
+as code or is data. Cibyl does not have this problem by virtue of being a
+development environment: Cibyl requires the source code and compiles binaries
+with symbol and relocation data retained.
+
+Dynamic binary translators~\cite{hookway97fx32, bala00dynamo, buck00dyninst}
+get around the code vs data problem by performing the translation at runtime
+and therefore only translates code as it executes. However, since Cibyl is
+targeting an embedded system, runtime memory and code size overhead which can
+result from doing runtime translation is a problem. Java virtual machines also
+do not allow loading dynamically generated code with a smaller than class
+granularity~\cite{lindholm99jvmspec}, which would mean a large overhead when
+calling generated code.
+
+Another approach to the problem of executing C or C++ applications on a Java
+virtual machine is to provide a compiler backend generating Java bytecode.
+This has been done in the Axiomatic solutions~\cite{axiomsol} multi-platform C
+compiler and as a part of the University of Queensland Binary Translator
+project~\cite{cifuentes00UAB}. Both these are based on an old version of GCC,
+and both face the problem of keeping the port updated with GCC releases, which
+is done automatically with the Cibyl approach (being independent of GCC
+version). Cibyl also automatically benefits from GCC optimization improvements
+with new versions. The benchmarks also show that the translation of MIPS
+binaries can be done with relatively low overhead, reducing the potential
+performance advantage of writing a targeted compiler backend.
+
+
+\section{Conclusions}
+\label{sec:intro:conclusions}
+The primary goal of this thesis has been to look into the tradeoff between
+performance and development effort for porting of software systems to new
+environments. I have investigated this tradeoff both for operating system
+porting from uniprocessors to multiprocessors and porting of C/C++
+applications to Java environments. Operating system porting was studied in
+Paper~I-IV and C/C++ porting to JVMs was studied in
+Paper~\Roman{nr:cibyl}-\Roman{nr:cibyl-performance}. Paper~\Roman{nr:lopi}
+presents a tool for program instrumentation which can be used during the
+development of large software systems in general, covering both major topics.
+
+% Answer questions
+The primary research question has been discussed in all papers in the thesis.
+For multiprocessor operating systems, Paper~\Roman{nr:tsp-giant-lock} and
+Paper~\Roman{nr:linux-appkern} present two radically different approaches to
+an initial port to a multiprocessor. In Paper~\Roman{nr:tsp-giant-lock}, a
+traditional kernel parallelization effort is described, which was found to be
+time consuming and difficult to scale. The application kernel approach in
+Paper~\Roman{nr:linux-appkern} implements multiprocessor support for Linux
+with minimal changes to the uniprocessor kernel. The application kernel
+approach also has limited scalability, but requires less knowledge and
+modifications of the original kernel. The approach in
+Paper~\Roman{nr:tsp-giant-lock} still has advantages, however. First, it
+balances processing among all CPUs, which the asymmetric application kernel
+approach does not do. Second, it provides a base for further incremental
+improvements, which was done in Paper~\Roman{nr:tsp-coarse}. These three
+papers illustrate the different tradeoffs between performance and development
+effort, ranging from the application kernel approach which focuses on
+development effort to the coarse-grained implementation in
+Paper~\Roman{nr:tsp-coarse} where a large effort was spent to achieve
+scalability.
+
+Papers~\Roman{nr:cibyl} and \Roman{nr:cibyl-performance} focuses on the
+language boundary part of the primary research question. The Cibyl approach is
+placed between the three extremes of re-implementing the source code in Java,
+implementing a full compiler backend to produce Java bytecode (both of which
+should give better performance) or providing pure emulation, which requires
+less implementation at the cost of lower performance. With the optimizations
+made, Cibyl is a viable alternative to the full compiler backend at lower
+maintenance cost (automatically benefiting from new GCC releases). Between the
+two other main topics, Paper~\Roman{nr:lopi} about the LOPI binary
+instrumentation framework deals with tool support to facilitate development,
+and also uses similar techniques as Cibyl.
+
+Papers~\Roman{nr:tsp-giant-lock} and \Roman{nr:tsp-coarse} also discuss
+research question 1 about the cost of a traditional symmetric lock-based
+multiprocessor port. The findings indicate that there is a significant cost
+associated with the traditional porting methods. For the first giant-locked
+port, a large proportion of the time was spent to grasp the functionality of
+the uniprocessor code, which was required to parallelize execution. For the
+coarse-grained port, the largest obstacles has instead been the move from
+completely serialized kernel execution (as in both the uniprocessor and the
+giant locked kernel) to a parallelized kernel. This brings along many ordering
+and timing issues which are not otherwise present. The larger team and
+experience gained from the prototype in Paper~\Roman{nr:tsp-giant-lock} meant
+that this work still required less time than the prototype.
+
+As a contrast to the first research question, research question 2 about
+alternative multiprocessor organizations is investigated in
+Paper~\Roman{nr:linux-appkern}. In this paper, we show that alternative
+asymmetric organizations such as the application kernel approach can provide
+shorter porting time at a cost of some overhead for kernel-bound tasks. The
+paper also shows that it is feasible to add multiprocessor support to an
+operating system kernel without modifications of the uniprocessor kernel.
+
+Research questions 3 and 4 are answered in Papers~\Roman{nr:lopi},
+\Roman{nr:cibyl} and \Roman{nr:cibyl-performance}. The LOPI paper shows
+techniques which can be employed to reduce perturbations of instrumented
+programs and illustrates the importance of architecture-dependent techniques
+to reduce perturbation. The two Cibyl papers in turn show that static binary
+translation is a feasible approach to provide portability of C and C++
+programs to Java virtual machines with adequate performance in real-life
+settings and low maintenance cost.
+
+% The minor questions
+
+%%% Local Variables: 
+%%% mode: latex
+%%% TeX-master: t
+%%% End: 

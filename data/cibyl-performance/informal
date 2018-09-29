@@ -1,0 +1,6 @@
+
+              Cibyl        Java       NestedVM        Host     |   Java/Cibyl    Java/NestedVM   Host/Cibyl   Host/NestedVM
+int             566         541           1251         149     |         0.96             0.43         0.26           0.12
+short           711         538           1275         142     |         0.76             0.42         0.20           0.11
+float          1429         573           1409         208     |         0.40             0.41         0.15           0.15
+double         4975         568           2644         224     |         0.11             0.21         0.05           0.08

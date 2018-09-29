@@ -1,0 +1,37 @@
+# emacs: -*-m4-*-
+#proc page
+#proc getdata
+
+#set BAR_WIDTH = 0.05
+
+file: data/freemap.dat
+
+fieldnames: field value err
+
+#proc areadef
+   rectangle: 1.4 2 4.4 3
+   xrange: 0 1.0
+   yautorange: datafield=value lowfix=0 incmult=2
+   yaxis.stubs: inc
+   yaxis.stubdetails: size=12
+
+#saveas AREA_A
+
+
+#proc xaxis
+   stubdetails: size=12
+   stubs: datafields=field
+
+#proc yaxis
+   label: Loop iterations
+   labeldetails: size=16 adjust=-0.4,0)
+
+#proc bars
+   lenfield: value
+   color: gray(0.5)
+   showvalues: yes
+   labeldetails: size=12 adjust=0,0.1
+
+#proc bars
+   lenfield: value
+   errbarfields: err

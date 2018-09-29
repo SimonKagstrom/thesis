@@ -1,0 +1,43 @@
+% Intro
+
+Computer hardware and software evolve very fast. With the advent of
+chip-multi\-processors and symmetric multithreading, multiprocessor hardware
+configurations are becoming prevalent. For software, new hardware and
+requirements such as security, performance and maintainability drive the
+development of new runtime environments, virtual machines and programming
+methodologies. These trends present problems when porting legacy
+software. Multiprocessor hardware require ports of uniprocessor operating
+system kernels while new software environments might require that programs
+have to be ported to different languages.
+
+This thesis examines the tradeoff between performance and development effort
+for software porting with case studies in operating system porting to
+multiprocessors and tool support for porting C and C++ applications to Java
+virtual machines. The thesis consists of seven papers. The first paper is a
+survey of existing multiprocessor development approaches and focuses on the
+tradeoff between performance and implementation effort. The second and third
+papers describe the evolution a traditional lock-based multiprocessor port,
+going from a serialized ``giant locked'' port and evolving into a
+coarse-grained implementation. The fourth paper instead presents an
+alternative porting approach which aims to minimize development effort. The
+fifth paper describes a tool for efficient instrumentation of programs, which
+can be used during the development of large software systems such as operating
+system kernels. The sixth and seventh papers finally describe a binary
+translator which translates MIPS binaries into Java bytecode to allow
+low-effort porting of C and C++ applications to Java virtual machines.
+
+
+% Contributions
+
+The first main contributions of this thesis is an in-depth investigation of
+the techniques used when porting operating system kernels to multiprocessors,
+focusing on development effort and performance. The traditional approach used
+in the second and third papers required longer development time than expected,
+and the alternative approach in the fourth paper can therefore be preferable
+in some cases. The second main contribution is the development of a binary
+translator that targets portability of C and C++ applications to J2ME
+devices. The last two papers show that the approach is functional and has good
+enough performance to be feasible in real-life situations.
+
+% Conclusions
+

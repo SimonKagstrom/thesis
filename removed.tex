@@ -1,0 +1,86 @@
+
+Figure~\ref{fig:introduction:cibyl-memory-access} illustrates two alternative
+memory organization. Note that the byte-sized memory representation requires
+two vector accesses while the integer-sized representation only needs one. In
+the byte-vector case, byte-sized accesses can be done directly with only one
+memory access while integer-sized accesses (32-bits) can be done with a single
+vector load in the other case. Integer-sized accesses are also proportionally
+more expensive with the byte memory vector than byte-sized accesses with the
+integer memory vector since the former requires three bitwise \textbf{shift}'s
+and four bitwise \textbf{or}'s while the latter only needs one \textbf{shift}
+and one \textbf{and}.
+
+\begin{figure}[t]
+  \begin{center}
+    \includegraphics[width=0.90\linewidth]{figures/introduction/cibyl-memory-access}
+  \end{center}
+  \caption[Translating memory accesses]{Two alternatives for translating memory accesses, illustrated with
+    reading a 16-bit short on address 2. The left part of the figure shows an
+    access with a byte-vector memory representation and the right the same
+    accesss with an integer-vector memory representation.}
+  \label{fig:introduction:cibyl-memory-access}
+\end{figure}
+
+Another general problem is unsigned arithmetic. All integer arithmetic
+instructions in Java bytecode operates on signed values whereas MIPS assembly
+(and most other instruction sets) has instructions for both signed and
+unsigned arithmetic. For most instructions this is not a problem, since e.g.,
+signed addition of two unsigned values will yield the same result as unsigned
+addition. The main sources of problems are unsigned multiplications, divisions and
+comparisons. The easiest way to solve these problems is to extend the 32-bit
+value into a 64-bit value, mask away the top 32 bits, perform the operation
+and crop the result to 32-bits again.
+
+Finally, while most MIPS instructions can be translated with a 1-1 to Java
+bytecode there are some exceptions. These instructions are multiplications,
+divisions, non-branch comparison instructions and register-indirect branches
+and calls. MIPS multiplications generate a 64-bit result in two registers
+while the corresponding Java bytecode instruction generate a 32-bit result.
+Similarly, the MIPS \texttt{div}/\texttt{divu} instructions generate both the
+result and the remainder in two registers, while these are two instructions in
+Java bytecode. The MIPS \texttt{slt} and \texttt{sltu} instructions assign a
+register to the result of a comparison, which has no corresponding Java
+bytecode instruction. These instructions can be translated to a set of
+multiple Java bytecode instructions.
+
+Register-indirect branches and calls are more difficult to implement in Java.
+Because of the security requirements, Java bytecode does not have computed
+gotos. The closest equivalent is two \texttt{switch} instructions, which can
+be used to switch on a passed address. Both NestedVM and Cibyl use this
+technique although in a slightly different way, illustrated in
+Figure~\ref{fig:introduction:cibyl-nestedvm-jalr}. Cibyl use a 1-1 mapping
+between C functions (ELF entry points) and Java methods. To support indirect
+calls, Cibyl generates a special method that contains a single big switch with
+calls to all possible targets of indirect calls. As shown in the left part of
+the figure, an indirect call from \texttt{fn1} to \texttt{fn2} will be a
+three-step process through the indirect call table.
+
+\begin{figure}[t]
+  \begin{center}
+    \includegraphics[width=0.90\linewidth]{figures/introduction/cibyl-nestedvm-jalr}
+  \end{center}
+  \caption{Indirect call handling}
+  \label{fig:introduction:cibyl-nestedvm-jalr}
+\end{figure}
+
+NestedVM does not use a 1-1 mapping between C functions and Java methods.  The
+method split, which is needed because of a Java 64KB method size limit, can
+instead be done at any location (with heuristics to avoid splitting functions
+unnecessary). To handle method calls in general, NestedVM therefore uses a flat
+structure with a top-level call table not tied to the C function calls as
+illustrated in the right part of the figure. In the call, NestedVM will return
+from \texttt{fn1} to the global call table and from there continue to
+\texttt{fn2}.
+
+There are advantages with both approaches. The 1-1 mapping used in Cibyl is
+closer to the original program, providing meaningful backtraces on crashes. It
+also allows better performance for the common case of direct calls (where
+NestedVM sometimes still needs to use the indirect method). The NestedVM
+approach instead makes it easier to support very big C functions (over 64KB of
+compiled code), \texttt{longjmp} (jumping to a saved stack context, possibly
+skipping called functions) and badly written assembly code.
+
+%%% Local Variables: 
+%%% mode: latex
+%%% TeX-master: t
+%%% End: 

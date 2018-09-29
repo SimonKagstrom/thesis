@@ -1,0 +1,408 @@
+\section{Introduction}
+A large majority of the mobile phones sold today come with support for the
+Java 2 Platform, Micro Edition (J2ME)~\cite{j2me}, and the installation base
+can be measured in billions of units~\cite{schwartz06j2mecoverage}. J2ME is a
+royalty-free Java development environment for mobile phones, and is often the
+only available method of extending the software installed on the phone. This
+poses a severe problem when porting C or C++ applications to J2ME devices,
+which can often require a complete rewrite in Java of the software, possibly
+assisted by automated tools~\cite{martin02ephedra, buddrus98cappucino,
+  malabarba99mohca, jazillan}.
+
+Cibyl is a binary translator which targets this problem. Cibyl translates MIPS
+binaries into Java bytecode, and provides means to integrate with native J2ME
+classes. Cibyl therefore allows C and C++ programs to be ported to run on J2ME
+phones. When designing Cibyl, our goals have been to produce compact
+translated code with performance close to native Java code for common cases.
+The general design of Cibyl has been described in an earlier
+paper~\cite{kagstrom07cibyl}, and this paper focuses on optimizations made
+to reduce the size and improve the performance of the translated binaries.
+
+The main contributions of this paper are the following. We first describe the
+set of optimizations we make and how these improve size and performance. We
+then perform a benchmark on an application ported with Cibyl to illustrate the
+optimizations in a real-world setting. Finally, we compare Cibyl against
+native Java and another binary translator, NestedVM~\cite{alliet04nestedvm} in
+a micro benchmark (an implementation of the A* algorithm) to study performance
+characteristics in detail. The performance results show that Cibyl is
+significantly faster than NestedVM and close to native Java performance on the
+cases we target.
+
+The rest of the paper is structured as follows. In Section~\ref{sec:cp:cibyl}
+we introduce the Cibyl binary translator. The main part of the paper then
+follows in Section~\ref{sec:cp:optimizations} where we describe the
+optimizations performed by Cibyl and Section~\ref{sec:cp:evaluation} where we
+evaluate our optimizations. Section~\ref{sec:cp:related_work} describes
+related work and finally we conclude and present future directions in
+Section~\ref{sec:cp:conclusions}.
+
+\section{Cibyl}
+\label{sec:cp:cibyl}
+\begin{figure*}[t]
+  \begin{center}
+    \includegraphics[width=0.96\linewidth]{figures/cibyl-performance/compilation}
+    \caption[Cibyl translation process]{Translation process in Cibyl. Gray boxes show unmodified
+      third-party tools.}
+    \label{fig:cp:compilation}
+  \end{center}
+\end{figure*}
+
+Cibyl uses the GCC~\cite{gcc} compiler to produce a MIPS~I~\cite{kane88mips}
+binary, which is thereafter translated into Java bytecode by the Cibyl tools.
+Figure~\ref{fig:cp:compilation} shows the translation process with Cibyl,
+where we use a set of tools to translate the MIPS binary. Apart from the
+binary translator, which outputs Java bytecode assembly to
+Jasmin~\cite{jasmin}, we also have a stub code generator to produce stubs for
+calls into native Java code. When translating, Cibyl uses Java local variables
+to represent MIPS registers, which contributes to producing efficient and
+compact code compared to using class member variables or static class
+variables. The MIPS instruction set is well suited for binary translation, and
+most arithmetic instructions can be directly translated to a sequence of
+loading source registers (local variables) on the Java operand stack,
+performing the operation and storing into the destination register.
+
+We use a Java integer array to represent memory as seen by the MIPS binary.
+This means that 32-bit memory accesses are performed efficiently by simply
+indexing the memory array with the address divided by four, but also that 8-
+and 16-bit accesses need an extra step of masking and shifting the value in
+memory to get the correct result. Since a common pattern is to use the same
+base register repeatedly with different offsets, we pre-calculate the array
+index and use special memory access registers for these cases. To reduce space, we
+also perform the more expensive 8- and 16-bit accesses through functions in
+the runtime support instead of generating bytecode directly. Similarly,
+expensive arithmetic operations such as unsigned multiplications are also
+implemented in the runtime layer. Since 32-bit access is easiest to support
+efficiently, Cibyl focuses on performance for this case.
+
+Cibyl uses a 1-1 mapping between C functions and generated Java methods, which
+brings a number of benefits. First, this mapping enables the J2ME profiler to
+produce meaningful output for Cibyl programs. Second, if the program causes an
+exception, the call chain emitted by the JVM will be human readable. The 1-1
+mapping also enables some optimizations, which will be discussed later.  We
+handle register-indirect function calls specially since Java bytecode does not
+support function pointers. To support function pointers, we generate a special
+``call table'' method that switches on the function address and calls the
+corresponding method indirectly.
+
+Compared to the integer instruction set, the MIPS floating point instruction
+set is more difficult to translate~\cite{kagstrom07cibyl}. Floating point is
+therefore supported by a hybrid approach where we use the GCC soft-float
+support, but implement the runtime support functions using native Java floats.
+This solution provides a tradeoff between implementation complexity and
+performance, with a very simple implementation but less performance than an
+implementation of the MIPS FPU instruction set.
+
+\section{Optimizations}
+\label{sec:cp:optimizations}
+We perform a number of optimizations in Cibyl apart from the general code
+generation optimizations described above to improve performance and reduce the
+size of the generated Java class files.
+
+\subsection{32-bit multiplications/divisions}
+The MIPS instruction for multiplication always produce a 64-bit result, split
+in the \texttt{hi}/\texttt{lo} register pair. We translate this to Java
+bytecode by casting the source registers to 64-bit longs, perform the
+multiplication, split the resulting value and place it in
+\texttt{hi}/\texttt{lo}. As expected, this generates many instructions in Java
+bytecode, and is also fairly inefficient and we perform it in the runtime
+support to save space.
+
+Often, however, only the low 32 bits of the value is actually used and in
+these cases we perform a 32-bit multiplication which can be done natively in
+Java bytecode. This is safe since the \texttt{lo}/\texttt{hi} registers are
+not communicated across functions in the MIPS ABI, so if the \texttt{hi}
+register is unused we simply skip producing it. This optimization saves both
+space and improves performance of multiplications. Divisions are handled
+similarly.
+
+\subsection{Size reduction}
+To reduce size, functions which are unused are pruned during translation, and
+relocation information in the binary is used to determine which functions are
+safe to remove. Similarly, the table of indirect calls contains only the
+functions which are called register-indirect, also determined by relocations
+and reconstructing values from instructions with relocations.
+
+The 1-1 mapping between C functions and Java also methods allows for size
+reductions together with the MIPS ABI~\cite{sco96mipsabi}. On function calls,
+we pass only the stack pointer and the argument registers used by the called
+function, which reduces the overhead for short functions. Another optimization
+the ABI allows is to skip stores and loads in the function prologue and
+epilogue to the MIPS callee-saved registers \texttt{s0}...\texttt{s8}, which
+are handled automatically as the register representation uses Java local
+variables.
+
+%We use execution profiles to arrange the output into multiple classes where we
+%co-locate methods based on execution count to co-locate ``hot'' methods in the
+%%same class. A special case is methods which are never executed in the profile,
+%and are placed in separate classes. Although this optimization often increases
+%the JAR size, placing unused methods into separate classes saves device memory
+%since the JVM typically loads classes on demand.
+
+\begin{figure*}[thb]
+  \begin{center}
+    \includegraphics[width=0.99\linewidth]{figures/cibyl-performance/colocated}
+    \caption{Handling of co-located functions in Cibyl}
+    \label{fig:cp:colocated}
+  \end{center}
+\end{figure*}
+
+\subsection{Inlining of builtin functionality}
+We perform selective inlining of certain functions in the runtime support,
+mostly for the floating point support. This optimization is implemented by
+matching function call names to a set of Python classes that implements these
+builtins. These then generate the corresponding functionality through
+emitting bytecode instructions directly, replacing the function call.
+
+This allows us to reduce the overhead of floating point operations
+significantly, at the cost of a slightly larger translated file. We use this
+functionality for other purposes as well, e.g., to throw and catch Java
+exceptions from C code.
+
+\subsection{Function co-location}
+One large source of overhead is method calls, i.e., translated C function
+calls. Since Cibyl uses local variables for the register representation, it
+needs to pass up to 7 arguments for the method to call, and method call
+overhead grows with the number of arguments. This overhead is especially
+noticeable with short functions which are frequently called.
+
+As a way around this problem, we allow multiple C functions to be co-located
+into one Java method. Calling between functions in a single Java method can
+then be done using regular \texttt{goto}'s avoiding the method call overhead.
+The implementation is illustrated in Figure~\ref{fig:cp:colocated}, which
+shows a call chain \textbf{fn1}, \textbf{fn2}, \textbf{fn3}:
+
+\begin{enumerate}
+\item Co-located methods are called with an index specifying the function to
+  call, then the method prologue does a switch on this index and calls the
+  function. The MIPS \texttt{ra} register is set to a special value to signify
+  that the function was called from outside the method.
+\item Calls to external methods are handled as elsewhere, with argument
+  registers (Java local variables) passed.
+\item On calls to functions within the method, a direct \texttt{goto} is used.
+  Passing argument registers are not needed, but we store a generated index
+  for the return address in the \texttt{ra} register (local variable).
+\item On returning, we switch on the \texttt{ra} register and jump back to
+  where the local call was made or out of the co-located method.
+\end{enumerate}
+
+There are a few differences compared to normal methods. First of all we need
+to save the \texttt{ra} register since it's now used for the function
+returns. Second, we allocate the used MIPS \texttt{s}-registers to different
+Java local variables for each function in the co-located method, which allows
+us to avoid storing store/restore these registers in the function as with
+normal methods.
+
+\subsection{Peephole optimizer}
+Cibyl also includes a peephole optimizer to improve common translation
+patterns. For example, since the size of MIPS instructions is fixed at 4
+bytes, constant assignments to registers is split in a
+\texttt{lui}/\texttt{addiu} pair to assign the upper and lower half of the
+register. These assignments are fairly common and are coalesced into one
+assignment by the peephole optimizer. Similarly, storing of intermediate
+results for computations in registers can often be avoided and kept on the
+Java operand stack.
+
+\section{Performance evaluation}
+\label{sec:cp:evaluation}
+We have evaluated Cibyl performance in two benchmarks, FreeMap and A*.
+FreeMap~\cite{shabtai07roadmap} is a GPS street navigation application
+originally written for X-windows but later ported to other platforms such as
+WindowsCE. It has been ported to the J2ME platform using Cibyl by an external
+developer, and consists of over 40000 lines of C code and 1600 lines of Java
+code. FreeMap uses a mixture of integer and floating point operations, and
+displaying the map is the most computationally intensive operation.
+
+We run FreeMap in the Sun J2ME emulator and set it up to perform a map
+rotation operation during one minute and count the number of iterations of the
+main loop during this time. Startup and shutdown time is ignored. We compare a
+non-optimized Cibyl version with an optimized one, where the optimizations
+enabled are inlining of builtins, optimization of 32-bit multiplications and
+divisions and co-location of functions dealing with redrawing.
+
+The A* benchmark consists of two implementations of the A* algorithm, one in C
+and one in Java, which are based on the same source. The Java implementation
+is not a port, but implemented Java-style using multiple classes. Both
+implementations stress memory management, dereferencing pointers/references
+and short function calls. The graph search visits 35004 nodes during the
+execution.
+
+\begin{figure}[bth]
+  \begin{center}
+    \includegraphics[width=0.58\linewidth]{data/cibyl-performance/freemap}
+    \caption[FreeMap benchmark results]{FreeMap benchmark results. The baseline shows results without
+      optimizations enabled.}
+    \label{fig:cp:freemap}
+  \end{center}
+\end{figure}
+
+We setup the A* implementation to use different data types for the main data
+structure (the nodes in the graph). The types are 32-bit \texttt{int}, 16-bit
+\texttt{short}, 32-bit \texttt{float} and the 64-bit \texttt{double}. We run
+the benchmark in Cibyl both without and with optimizations, in NestedVM and in
+Java on the Sun JDK 1.5.0~\cite{sunjdk} JVM, the Kaffe JVM~\cite{kaffe}, the
+SableVM~\cite{gagon03sablevm} interpreter and the GNU Java bytecode
+interpreter (gij)~\cite{gcj}. The Cibyl optimizations we use is inlining of
+builtins, memory registers, multiplication and division optimization, and function
+co-location. We co-locate the functions in the hottest call chain, which is
+the actual A* algorithm, looking up nodes, iterating over nodes and computing
+distance heuristics.
+
+All benchmarks are executed on a Pentium~M processor at 600 MHz with Debian
+GNU/Linux. The A* benchmarks are compiled with GCC 3.3.6 (using the NestedVM
+compiler), using the default options for NestedVM and Cibyl, optimizing at
+level -O3 in the NestedVM case and -Os, size, for Cibyl. The FreeMap
+benchmark is compiled with GCC 4.1.2, optimizing for size.
+
+\subsection{Results}
+For FreeMap, shown in Figure~\ref{fig:cp:freemap}, we see that enabling the
+optimizations improves the performance with almost 15\% over the non-optimized
+version. This improvement is visible in the emulator update frequency.  The
+majority of the improvement comes from function co-location and the use of
+builtins. The size of the FreeMap classes is 592KB of which 457KB are
+Cibyl-generated classes.
+
+% No opt:          3497
+% Only O:          3648
+% all:             4046
+% builtins and O:  3961
+% coloc only:      3981
+\begin{figure*}[t]
+  \begin{center}
+    Integer
+
+    \includegraphics[width=0.45\linewidth]{data/cibyl-performance/int-sun}~\includegraphics[width=0.45\linewidth]{data/cibyl-performance/int-kaffe}\\
+
+    Short
+
+    \includegraphics[width=0.45\linewidth]{data/cibyl-performance/short-sun}~\includegraphics[width=0.45\linewidth]{data/cibyl-performance/short-kaffe}\\
+
+    Float
+
+    \includegraphics[width=0.45\linewidth]{data/cibyl-performance/float-sun}~\includegraphics[width=0.45\linewidth]{data/cibyl-performance/float-kaffe}\\
+
+    Double
+
+    \includegraphics[width=0.45\linewidth]{data/cibyl-performance/double-sun}~\includegraphics[width=0.45\linewidth]{data/cibyl-performance/double-kaffe}\\
+    \caption[A* benchmark results]{Results of the A* benchmark for the integer,
+    short, float and double data types \emph{continued on the next page}}
+    \label{fig:cp:astar}
+  \end{center}
+\end{figure*}
+
+\begin{figure*}[t]
+  \begin{center}
+    Integer
+
+    \includegraphics[width=0.45\linewidth]{data/cibyl-performance/int-sablevm}~\includegraphics[width=0.45\linewidth]{data/cibyl-performance/int-gij}\\
+
+    Short
+
+    \includegraphics[width=0.45\linewidth]{data/cibyl-performance/short-sablevm}~\includegraphics[width=0.45\linewidth]{data/cibyl-performance/short-gij}\\
+
+    Float
+
+    \includegraphics[width=0.45\linewidth]{data/cibyl-performance/float-sablevm}~\includegraphics[width=0.45\linewidth]{data/cibyl-performance/float-gij}\\
+
+    Double
+
+    \includegraphics[width=0.45\linewidth]{data/cibyl-performance/double-sablevm}~\includegraphics[width=0.45\linewidth]{data/cibyl-performance/double-gij}\\
+  \begin{flushleft}
+    Figure~\ref{fig:cp:astar}: Results of the A* benchmark for the integer,
+    short, float and double data types
+  \end{flushleft}
+  \end{center}
+\end{figure*}
+
+In the A* benchmark, presented in Figure~\ref{fig:cp:astar}, we can see that
+Cibyl performs very well in the integer-case, being on par with Java on the
+Sun JVM and significantly faster than NestedVM on all tested JVMs. This is
+expected since our optimizations target the of 32-bit data case, and the
+optimizations improve results with between 10-40\% depending on JVM.  Cibyl is
+faster than NestedVM also in the unoptimized case, which is most likely caused
+by the higher use of Java local variables in Cibyl (which are more efficient
+to access than class members). NestedVM also references memory in a two-level
+scheme to support sparse address spaces~\cite{alliet04nestedvm}, which
+contributes a bit to the overhead.
+\FloatBarrier
+
+For the other cases, there is a more mixed picture. As expected, both Cibyl
+and NestedVM are far behind Java in these cases since the translated code
+cannot work directly with 16-bit or 64-bit values and less efficiently with
+floating point values. With shorts, Cibyl performs better than NestedVM on the
+Sun JVM and SableVM and marginally worse on Kaffe and Gij. The slowdown
+compared to the integer benchmark is caused by additional memory latency, and
+the relative slowdown compared to NestedVM can be explained by the calls into
+the runtime for 16-bit memory accesses.
+
+The floating point part, both Cibyl and NestedVM frequently need to store
+floats in integer variables or memory (through the method
+\texttt{Float.\-floatBitsToInt}), which decrease the performance a lot compared
+to native Java. For the Sun JVM, Cibyl has performance comparable to NestedVM,
+but is behind on the other JVMs, which is caused by soft-float overhead.
+However, we can see that the builtin optimization substantially improves
+performance with 30-40\%. The double case is not optimized by the builtin
+approach, and show only small improvements from the optimization.
+
+An outlier is native Java on the Kaffe JVM, which shows much worse results
+than on the other JVMs throughout all the tests. On the other hand, Kaffe
+gives good results with Cibyl and NestedVM, which use a simpler program
+structure based on calls of static methods.
+
+The size of the classes including runtime support in A* benchmark is 37KB for
+the optimized Cibyl version, 240KB for NestedVM and 61KB for native Java.
+Cibyl loads static data (the \texttt{.data} and \texttt{.rodata} ELF sections)
+from a file, and with that included in the class size as done in NestedVM and
+native Java, the Cibyl size is 75KB. The size advantage compared to NestedVM
+is caused by the larger NestedVM runtime, and the more aggressive use of Java
+local variables in Cibyl which decreases the size compared to class members.
+
+\FloatBarrier
+\section{Related work}
+\label{sec:cp:related_work}
+NestedVM~\cite{alliet04nestedvm} has many similarities with Cibyl. NestedVM is
+also a binary translator that translates MIPS binaries into Java bytecode, but
+NestedVM targets security - being able to run insecure binaries in a secure VM
+- while Cibyl targets portability to J2ME devices. This is reflected in some
+of the design decisions, where NestedVM uses a two-level scheme for memory
+accesses (but which can be disabled) to detect accesses of uninitialized
+memory, and an optional UNIX compatibility layer to support translation of
+existing UNIX tools. Cibyl on the other hand focuses on generation of compact
+code and good performance for the common and easily supported case of 32-bit
+memory accesses. Cibyl also uses Java local variables for the register
+representation throughout, whereas NestedVM uses local variables only for
+caching the normal class variable register representation.
+
+There is also a set of compilers which can generate Java bytecode directly.
+Axiomatic solutions~\cite{axiomsol} has a compiler for a subset of C which
+generates Java bytecode. Cibyl supports the C language fully, and with runtime
+support any language which GCC can compile. The University of Queensland
+Binary Translator project has a Java bytecode backend for
+GCC~\cite{cifuentes00UAB}. This backend is not part of mainline GCC, and
+tracking mainline development can require a significant effort. In contrast,
+Cibyl is independent of GCC and able to any GCC version which can generate
+MIPS binaries.
+
+\section{Conclusions and future work}
+\label{sec:cp:conclusions}
+In this paper, we have presented the optimization framework for the Cibyl
+binary translator and benchmarked it against NestedVM and native Java. We show
+how function co-location, inlining of the soft-float implementation and use of
+the MIPS ABI contributes to improve the performance of code translated with
+Cibyl. Our benchmarks illustrates how these optimizations can improve
+performance of real-world Cibyl applications and how binary translation is
+affected by data types. We also compare Cibyl to the NestedVM binary
+translator and native Java and show that performance in the case we target is
+significantly better than NestedVM and close to performance of native Java.
+
+Future directions to improve performance includes implementing the MIPS FPU
+instruction set, which is an area where NestedVM has an advantage. We are also
+planning an implementation of register type and value tracking, which can
+reduce size and improve performance by avoiding arithmetic operations with
+constant values and by reducing conversions between floats and integer
+representations of floating point values.
+
+\section*{Acknowledgements and Availability}
+This work was partly funded by The Knowledge Foundation in Sweden under a
+research grant for the project ``Blekinge - Engineering Software Qualities
+(BESQ)'' (\url{http://www.bth.se/~besq}). Cibyl is free software under the GNU
+GPL and can be downloaded from \url{http://cibyl.googlecode.com}.
